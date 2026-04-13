@@ -35,7 +35,7 @@ let prettyScaled;
 function preload() {
   // Check path: assets -> animals -> sparrow.png
   sparrowImg = loadImage("assets/animals/sparrow.png"); 
-  prettyBg = loadImage('assets/prettyPixels.png');
+  prettyBg = loadImage('assets/grass.jpg');
   constructionBg = loadImage('assets/construction.png');
   bodySegmentation = ml5.bodySegmentation("SelfieSegmentation", options);
 }
