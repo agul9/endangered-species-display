@@ -34,7 +34,8 @@ let prettyScaled;
 
 function preload() {
   // Check path: assets -> animals -> sparrow.png
-  sparrowImg = loadImage("assets/animals/sparrow.png"); 
+  sparrowImg = loadImage("assets/animals/sparrow.png");
+  turtleImg = loadImage("assets/animals/seaTurtle.png")
   prettyBg = loadImage('assets/grass.jpg');
   constructionBg = loadImage('assets/construction.png');
   bodySegmentation = ml5.bodySegmentation("SelfieSegmentation", options);
@@ -54,7 +55,12 @@ function setup() {
 
   // Create animals and place them randomly at the start
   for (let i = 0; i < 15; i++) {
-    let a = new Animal(sparrowImg, random(1.2, 2.0));
+    let a; 
+    if (i < 8) {
+      a = new Animal(sparrowImg, random(1.2, 2.0));
+    } else {
+      a = new Animal(turtleImg, random(1.2, 2.0));
+    }
 
     a.w = random(100, 150);
     a.h = a.w;
