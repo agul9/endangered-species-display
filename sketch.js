@@ -1,4 +1,5 @@
-// to do: 
+// copy
+//to do: 
 // 1. done - fix so it works with multiple people (redo center calculation)
 // 2. done - make the mask stuff slower - like the opacity slowly fades in / out as the person is detected instead of being so harsh
 // 3. add skeleton / outline to person OR add like a counter 'x people detected'
