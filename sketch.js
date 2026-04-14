@@ -1,5 +1,4 @@
-// copy
-//to do: 
+// to do: 
 // 1. done - fix so it works with multiple people (redo center calculation)
 // 2. done - make the mask stuff slower - like the opacity slowly fades in / out as the person is detected instead of being so harsh
 // 3. add skeleton / outline to person OR add like a counter 'x people detected'
@@ -7,7 +6,7 @@
 // 5. change bg to something more meaningful - maybe gt land area before gt was built ? 
 // 6. done - why is the text always showing now, it should only show when there is a collision ?
 
-// hello111
+// hello
 // variables for nature bg
 let tempBuffer;
 let finalImg;
@@ -23,6 +22,11 @@ let bodySegmentation;
 let segmentation;
 let options = { maskType: "background" };
 let sparrowImg;
+let seaTurtle;
+
+// NEW: pose detection
+let bodyPose;
+let poses = [];
 
 // Population & Message
 let remainingPopulation = 100;
@@ -41,6 +45,7 @@ function preload() {
   seaTurtle = loadImage("assets/animals/seaTurtle.png"); 
   prettyBg = loadImage("assets/grass.jpg");
   constructionBg = loadImage("assets/construction.png");
+
   bodySegmentation = ml5.bodySegmentation("SelfieSegmentation", options);
 }
 
@@ -83,7 +88,14 @@ function setup() {
   video.size(640, 480);
   video.hide();
 
+  // segmentation
   bodySegmentation.detectStart(video, gotResults);
+
+  // NEW: pose detection
+  bodyPose = ml5.bodyPose("MoveNet", {
+    modelType: "MULTIPOSE_LIGHTNING"
+  });
+  bodyPose.detectStart(video, gotPoses);
 
   textAlign(CENTER, CENTER);
   textFont("Courier New");
@@ -110,14 +122,10 @@ function draw() {
   // Draw smooth silhouette with nature texture
   drawPrettySilhouetteSmooth();
 
+  // NEW: draw digital skeletons
+  drawDigitalSkeletons();
+
   let detectedPeople = getPeople();
-  
-  // Draw a red dot at every person center
-  for (let p of detectedPeople) {
-    fill(255, 0, 0);
-    noStroke();
-    ellipse(p.x, p.y, 20, 20);
-  }
 
   for (let a of animals) {
     if (a.update) {
@@ -198,6 +206,10 @@ function draw() {
 
 function gotResults(result) {
   segmentation = result;
+}
+
+function gotPoses(results) {
+  poses = results || [];
 }
 
 function resetExperience() {
@@ -463,4 +475,127 @@ function drawCropMarks() {
   line(width - pad, height - pad, width - pad - len, height - pad);
   line(width - pad, height - pad, width - pad, height - pad - len);
   pop();
+}
+
+// =========================
+// NEW: DIGITAL SKELETON
+// =========================
+
+function drawDigitalSkeletons() {
+  if (!poses || poses.length === 0) return;
+
+  for (let poseObj of poses) {
+    let keypoints = poseObj.keypoints || [];
+    if (!keypoints || keypoints.length === 0) continue;
+
+    // skeleton lines
+    drawPoseLine(keypoints, "left_shoulder", "right_shoulder", [255, 0, 0]);
+
+    drawPoseLine(keypoints, "left_shoulder", "left_elbow", [0, 100, 255]);
+    drawPoseLine(keypoints, "left_elbow", "left_wrist", [0, 255, 255]);
+
+    drawPoseLine(keypoints, "right_shoulder", "right_elbow", [255, 255, 0]);
+    drawPoseLine(keypoints, "right_elbow", "right_wrist", [180, 255, 0]);
+
+    drawPoseLine(keypoints, "left_shoulder", "left_hip", [0, 255, 0]);
+    drawPoseLine(keypoints, "right_shoulder", "right_hip", [0, 255, 255]);
+    drawPoseLine(keypoints, "left_hip", "right_hip", [255, 255, 0]);
+
+    drawPoseLine(keypoints, "left_hip", "left_knee", [0, 255, 255]);
+    drawPoseLine(keypoints, "left_knee", "left_ankle", [120, 255, 120]);
+
+    drawPoseLine(keypoints, "right_hip", "right_knee", [255, 150, 0]);
+    drawPoseLine(keypoints, "right_knee", "right_ankle", [255, 120, 120]);
+
+    drawPoseLine(keypoints, "nose", "left_eye", [255, 180, 255]);
+    drawPoseLine(keypoints, "nose", "right_eye", [255, 180, 255]);
+    drawPoseLine(keypoints, "left_eye", "left_ear", [255, 180, 255]);
+    drawPoseLine(keypoints, "right_eye", "right_ear", [255, 180, 255]);
+
+    // torso helper
+    drawPoseLine(keypoints, "nose", "left_shoulder", [255, 120, 255]);
+    drawPoseLine(keypoints, "nose", "right_shoulder", [255, 120, 255]);
+
+    // numbered joints
+    const orderedNames = [
+      "nose",          // 0
+      "left_eye",      // 1
+      "right_eye",     // 2
+      "left_ear",      // 3
+      "right_ear",     // 4
+      "left_shoulder", // 5
+      "right_shoulder",// 6
+      "left_elbow",    // 7
+      "right_elbow",   // 8
+      "left_wrist",    // 9
+      "right_wrist",   // 10
+      "left_hip",      // 11
+      "right_hip",     // 12
+      "left_knee",     // 13
+      "right_knee",    // 14
+      "left_ankle",    // 15
+      "right_ankle"    // 16
+    ];
+
+    for (let i = 0; i < orderedNames.length; i++) {
+      let kp = getKeypointByName(keypoints, orderedNames[i]);
+      if (!isValidKeypoint(kp)) continue;
+
+      let pt = poseToCanvas(kp);
+
+      push();
+      fill(220, 220, 220, 240);
+      stroke(150);
+      strokeWeight(2);
+      ellipse(pt.x, pt.y, 30, 30);
+
+      noStroke();
+      fill(80);
+      textAlign(CENTER, CENTER);
+      textSize(14);
+      text(i, pt.x, pt.y);
+      pop();
+    }
+  }
+}
+
+function drawPoseLine(keypoints, nameA, nameB, col) {
+  let a = getKeypointByName(keypoints, nameA);
+  let b = getKeypointByName(keypoints, nameB);
+
+  if (!isValidKeypoint(a) || !isValidKeypoint(b)) return;
+
+  let pa = poseToCanvas(a);
+  let pb = poseToCanvas(b);
+
+  push();
+  stroke(col[0], col[1], col[2]);
+  strokeWeight(7);
+  line(pa.x, pa.y, pb.x, pb.y);
+  pop();
+}
+
+function getKeypointByName(keypoints, name) {
+  for (let kp of keypoints) {
+    if (kp.name === name || kp.part === name) return kp;
+  }
+  return null;
+}
+
+function isValidKeypoint(kp) {
+  if (!kp) return false;
+
+  let score = 1;
+  if (kp.score !== undefined) score = kp.score;
+  if (kp.confidence !== undefined) score = kp.confidence;
+
+  return score > 0.2;
+}
+
+function poseToCanvas(kp) {
+  // mirrored camera -> x reversed
+  return {
+    x: map(kp.x, 0, video.width, width, 0),
+    y: map(kp.y, 0, video.height, 0, height)
+  };
 }
