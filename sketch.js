@@ -6,7 +6,7 @@
 // 5. change bg to something more meaningful - maybe gt land area before gt was built ? 
 // 6. done - why is the text always showing now, it should only show when there is a collision ?
 
-// hello
+// hello111
 // variables for nature bg
 let tempBuffer;
 let finalImg;
