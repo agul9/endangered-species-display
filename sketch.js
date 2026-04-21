@@ -38,11 +38,11 @@ function preload() {
 
   let northAtlanticRightWhaleImg = loadImage("assets/animals/northAtlanticRightWhale.png");
   let gopherTortoiseImg = loadImage("assets/animals/gopherTortoise.png");
-  let redCockadedWoodpeckerImg = loadImage("assets/animals/redCockadedWoodpecker.png");
-  let westIndianManateeImg = loadImage("assets/animals/westIndianManatee.png");
-  let loggerHeadSeaTurtleImg = loadImage("assets/animals/loggerHeadSeaTurtle.png");
-  let woodStorkImg = loadImage("assets/animals/woodStork.png");
-  let etowahDarterImg = loadImage("assets/animals/etowahDarter.png");
+  let redCockadedWoodpeckerImg = loadImage("assets/animals/RedCockadedWoodpecker.png");
+  let westIndianManateeImg = loadImage("assets/animals/WestIndianManatee.png");
+  let loggerHeadSeaTurtleImg = loadImage("assets/animals/LoggerHeadSeaTurtle.png");
+  let woodStorkImg = loadImage("assets/animals/WoodStork.png");
+  let etowahDarterImg = loadImage("assets/animals/EtowahDarter.png");
 
   speciesData = [
     {
