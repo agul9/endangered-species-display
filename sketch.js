@@ -649,6 +649,11 @@ class Spirit {
 
   display() {
     if (!this.img) return;
-    image(this.img, this.x, this.y, 100, 100);
+    if (this.state === "ghost") {
+      image(this.img, this.x, this.y,100,100);
+    } else{
+      this.img.resize(400,0);
+      image(this.img, this.x, this.y);
+    }
   }
 }
