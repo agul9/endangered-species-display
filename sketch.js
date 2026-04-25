@@ -1,5 +1,7 @@
 // =========================
 // FULL UPDATED sketch.js
+// segmentation-center + simple skeleton version
+// animal scale by species
 // =========================
 
 const INFO_TOTAL_DURATION = 18000;
@@ -15,12 +17,10 @@ let bodyPose;
 let poses = [];
 
 let prettyBg;
+let oceanBg;
 let constructionBg;
-let prettyScaled;
 
-let tempBuffer;
 let bgBuffer;
-
 let ghostImg;
 
 let spirits = [];
@@ -31,9 +31,23 @@ let activeInfo = null;
 
 let startTime;
 
+let personModes = []; // [{x, y, mode: "grass" | "ocean"}]
+const PERSON_MODE_SMOOTH_DIST = 220;
+const PERSON_CIRCLE_RADIUS = 120;
+
+// segmentation clustering
+const SEGMENT_SAMPLE_STEP = 18;
+const SEGMENT_CLUSTER_DIST = 140;
+const SEGMENT_MIN_CLUSTER_SIZE = 25;
+
+// animal size
+const GHOST_SIZE = 60;
+const ANIMAL_BASE_SIZE = 220;
+
 function preload() {
   ghostImg = loadImage("assets/animals/ghost.png");
   prettyBg = loadImage("assets/grass.jpg");
+  oceanBg = loadImage("assets/animals/ocean.jpg");
   constructionBg = loadImage("assets/construction.png");
 
   let northAtlanticRightWhaleImg = loadImage("assets/animals/northAtlanticRightWhale.png");
@@ -47,6 +61,8 @@ function preload() {
   speciesData = [
     {
       img: northAtlanticRightWhaleImg,
+      habitat: "marine",
+      scale: 9.10, // biggest
       bubbleColor: [70, 110, 190],
       info: [
         "Hi! I'm the North Atlantic Right Whale.",
@@ -57,6 +73,8 @@ function preload() {
     },
     {
       img: gopherTortoiseImg,
+      habitat: "land",
+      scale: 1.5,
       bubbleColor: [181, 126, 62],
       info: [
         "Hi! I'm the Gopher Tortoise.",
@@ -67,6 +85,8 @@ function preload() {
     },
     {
       img: redCockadedWoodpeckerImg,
+      habitat: "land",
+      scale: 0.5, // small bird
       bubbleColor: [176, 63, 63],
       info: [
         "Hi! I'm the Red-cockaded Woodpecker.",
@@ -77,6 +97,8 @@ function preload() {
     },
     {
       img: westIndianManateeImg,
+      habitat: "marine",
+      scale: 1.9,
       bubbleColor: [74, 145, 134],
       info: [
         "Hi! I'm the West Indian Manatee.",
@@ -87,6 +109,8 @@ function preload() {
     },
     {
       img: loggerHeadSeaTurtleImg,
+      habitat: "marine",
+      scale: 2.7,
       bubbleColor: [88, 140, 86],
       info: [
         "Hi! I'm the Loggerhead Sea Turtle.",
@@ -97,6 +121,8 @@ function preload() {
     },
     {
       img: woodStorkImg,
+      habitat: "land",
+      scale: 1.8, // medium bird
       bubbleColor: [120, 120, 120],
       info: [
         "Hi! I'm the Wood Stork.",
@@ -107,6 +133,8 @@ function preload() {
     },
     {
       img: etowahDarterImg,
+      habitat: "marine",
+      scale: 0.5, // small fish
       bubbleColor: [140, 88, 170],
       info: [
         "Hi! I'm the Etowah Darter.",
@@ -129,18 +157,18 @@ function setup() {
   video.size(640, 480);
   video.hide();
 
-  tempBuffer = createGraphics(width, height);
   bgBuffer = createGraphics(width, height);
 
-  prettyScaled = createGraphics(width, height);
-  prettyScaled.image(prettyBg, 0, 0, width, height);
-
-  bodySegmentation.detectStart(video, (res) => segmentation = res);
+  bodySegmentation.detectStart(video, (res) => {
+    segmentation = res;
+  });
 
   bodyPose = ml5.bodyPose("MoveNet", {
-    modelType: "MULTIPOSE_LIGHTNING"
+    modelType: "SINGLEPOSE_LIGHTNING"
   });
-  bodyPose.detectStart(video, (res) => poses = res);
+  bodyPose.detectStart(video, (res) => {
+    poses = res;
+  });
 
   for (let i = 0; i < GHOST_COUNT; i++) {
     let s = new Spirit(ghostImg, random(speciesData));
@@ -159,17 +187,19 @@ function draw() {
   background(0);
 
   drawCameraBW();
-  drawSilhouette();
-  drawDigitalSkeletons();
 
-  let people = getPeople();
+  let people = getPeopleFromSegmentation();
+  updatePersonModes(people);
+
+  drawPersonTextureCircles();
+  drawDigitalSkeletonsSimple();
 
   for (let s of spirits) {
     s.update();
 
     if (s.state === "ghost") {
-      if (!activeInfo && checkCollision(s)) {
-        let p = getClosestPerson(s, people);
+      if (!activeInfo && checkCollisionWithPeopleCircles(s, personModes)) {
+        let p = getClosestEligiblePerson(s, personModes);
         if (p) startInteraction(s, p);
       }
     }
@@ -201,89 +231,174 @@ function drawCameraBW() {
   image(bgBuffer, 0, 0);
 }
 
-function drawSilhouette() {
-  if (!segmentation || !segmentation.maskImageData) return;
-
-  let maskImg = createImage(video.width, video.height);
-  maskImg.loadPixels();
+function getPeopleFromSegmentation() {
+  if (!segmentation || !segmentation.maskImageData) return [];
 
   let data = segmentation.maskImageData.data;
-  for (let i = 0; i < data.length; i += 4) {
-    maskImg.pixels[i] = 255;
-    maskImg.pixels[i + 1] = 255;
-    maskImg.pixels[i + 2] = 255;
-    maskImg.pixels[i + 3] = data[i + 3];
+  let points = [];
+
+  for (let y = 0; y < video.height; y += SEGMENT_SAMPLE_STEP) {
+    for (let x = 0; x < video.width; x += SEGMENT_SAMPLE_STEP) {
+      let idx = (y * video.width + x) * 4;
+      let alpha = data[idx + 3];
+
+      if (alpha > 120) {
+        points.push({ x, y });
+      }
+    }
   }
-  maskImg.updatePixels();
 
-  tempBuffer.clear();
-  tempBuffer.push();
-  tempBuffer.translate(width, 0);
-  tempBuffer.scale(-1, 1);
-  tempBuffer.image(maskImg, 0, 0, width, height);
-  tempBuffer.pop();
+  if (points.length === 0) return [];
 
-  let sil = prettyScaled.get();
-  sil.mask(tempBuffer);
-  image(sil, 0, 0);
+  let clusters = [];
+
+  for (let p of points) {
+    let found = false;
+
+    for (let c of clusters) {
+      if (dist(p.x, p.y, c.x, c.y) < SEGMENT_CLUSTER_DIST) {
+        c.x = (c.x * c.count + p.x) / (c.count + 1);
+        c.y = (c.y * c.count + p.y) / (c.count + 1);
+        c.count++;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      clusters.push({
+        x: p.x,
+        y: p.y,
+        count: 1
+      });
+    }
+  }
+
+  let realPeople = clusters.filter(c => c.count >= SEGMENT_MIN_CLUSTER_SIZE);
+
+  return realPeople.map(c => ({
+    x: map(c.x, 0, video.width, width, 0),
+    y: map(c.y, 0, video.height, 0, height)
+  }));
 }
 
-function drawDigitalSkeletons() {
+function updatePersonModes(people) {
+  let updated = [];
+
+  for (let p of people) {
+    let matched = null;
+    let minD = Infinity;
+
+    for (let old of personModes) {
+      let d = dist(p.x, p.y, old.x, old.y);
+      if (d < PERSON_MODE_SMOOTH_DIST && d < minD) {
+        minD = d;
+        matched = old;
+      }
+    }
+
+    if (matched) {
+      updated.push({
+        x: p.x,
+        y: p.y,
+        mode: matched.mode
+      });
+    } else {
+      updated.push({
+        x: p.x,
+        y: p.y,
+        mode: random() < 0.5 ? "grass" : "ocean"
+      });
+    }
+  }
+
+  personModes = updated;
+}
+
+function drawPersonTextureCircles() {
+  for (let p of personModes) {
+    push();
+
+    drawingContext.save();
+    drawingContext.beginPath();
+    drawingContext.arc(p.x, p.y, PERSON_CIRCLE_RADIUS, 0, TWO_PI);
+    drawingContext.clip();
+
+    if (p.mode === "grass") {
+      image(
+        prettyBg,
+        p.x - PERSON_CIRCLE_RADIUS,
+        p.y - PERSON_CIRCLE_RADIUS,
+        PERSON_CIRCLE_RADIUS * 2,
+        PERSON_CIRCLE_RADIUS * 2
+      );
+    } else {
+      image(
+        oceanBg,
+        p.x - PERSON_CIRCLE_RADIUS,
+        p.y - PERSON_CIRCLE_RADIUS,
+        PERSON_CIRCLE_RADIUS * 2,
+        PERSON_CIRCLE_RADIUS * 2
+      );
+    }
+
+    drawingContext.restore();
+
+    stroke(255, 160);
+    strokeWeight(4);
+    noFill();
+    ellipse(p.x, p.y, PERSON_CIRCLE_RADIUS * 2, PERSON_CIRCLE_RADIUS * 2);
+
+    pop();
+  }
+}
+
+function drawDigitalSkeletonsSimple() {
   if (!poses || poses.length === 0) return;
 
   for (let pose of poses) {
     let keypoints = pose.keypoints || [];
     if (!keypoints.length) continue;
 
-    drawPoseLine(keypoints, "left_shoulder", "right_shoulder", [255, 0, 0]);
-    drawPoseLine(keypoints, "left_shoulder", "left_elbow", [0, 100, 255]);
-    drawPoseLine(keypoints, "left_elbow", "left_wrist", [0, 255, 255]);
-    drawPoseLine(keypoints, "right_shoulder", "right_elbow", [255, 255, 0]);
-    drawPoseLine(keypoints, "right_elbow", "right_wrist", [180, 255, 0]);
-    drawPoseLine(keypoints, "left_shoulder", "left_hip", [0, 255, 0]);
-    drawPoseLine(keypoints, "right_shoulder", "right_hip", [0, 255, 255]);
-    drawPoseLine(keypoints, "left_hip", "right_hip", [255, 255, 0]);
-    drawPoseLine(keypoints, "left_hip", "left_knee", [0, 255, 255]);
-    drawPoseLine(keypoints, "left_knee", "left_ankle", [120, 255, 120]);
-    drawPoseLine(keypoints, "right_hip", "right_knee", [255, 150, 0]);
-    drawPoseLine(keypoints, "right_knee", "right_ankle", [255, 120, 120]);
-    drawPoseLine(keypoints, "nose", "left_eye", [255, 180, 255]);
-    drawPoseLine(keypoints, "nose", "right_eye", [255, 180, 255]);
-    drawPoseLine(keypoints, "left_eye", "left_ear", [255, 180, 255]);
-    drawPoseLine(keypoints, "right_eye", "right_ear", [255, 180, 255]);
-    drawPoseLine(keypoints, "nose", "left_shoulder", [255, 120, 255]);
-    drawPoseLine(keypoints, "nose", "right_shoulder", [255, 120, 255]);
+    drawPoseLineSimple(keypoints, "left_shoulder", "right_shoulder");
+    drawPoseLineSimple(keypoints, "left_shoulder", "left_elbow");
+    drawPoseLineSimple(keypoints, "left_elbow", "left_wrist");
+    drawPoseLineSimple(keypoints, "right_shoulder", "right_elbow");
+    drawPoseLineSimple(keypoints, "right_elbow", "right_wrist");
+    drawPoseLineSimple(keypoints, "left_shoulder", "left_hip");
+    drawPoseLineSimple(keypoints, "right_shoulder", "right_hip");
+    drawPoseLineSimple(keypoints, "left_hip", "right_hip");
+    drawPoseLineSimple(keypoints, "left_hip", "left_knee");
+    drawPoseLineSimple(keypoints, "left_knee", "left_ankle");
+    drawPoseLineSimple(keypoints, "right_hip", "right_knee");
+    drawPoseLineSimple(keypoints, "right_knee", "right_ankle");
 
-    const orderedNames = [
-      "nose", "left_eye", "right_eye", "left_ear", "right_ear",
-      "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-      "left_wrist", "right_wrist", "left_hip", "right_hip",
-      "left_knee", "right_knee", "left_ankle", "right_ankle"
+    let simplePoints = [
+      "nose",
+      "left_shoulder", "right_shoulder",
+      "left_elbow", "right_elbow",
+      "left_wrist", "right_wrist",
+      "left_hip", "right_hip",
+      "left_knee", "right_knee",
+      "left_ankle", "right_ankle"
     ];
 
-    for (let i = 0; i < orderedNames.length; i++) {
-      let kp = getKeypointByName(keypoints, orderedNames[i]);
+    for (let name of simplePoints) {
+      let kp = getKeypointByName(keypoints, name);
       if (!isValidKeypoint(kp)) continue;
 
       let pt = poseToCanvas(kp);
 
       push();
-      fill(220, 220, 220, 240);
-      stroke(150);
-      strokeWeight(2);
-      ellipse(pt.x, pt.y, 30, 30);
-
       noStroke();
-      fill(80);
-      textAlign(CENTER, CENTER);
-      textSize(14);
-      text(i, pt.x, pt.y);
+      fill(255, 220);
+      ellipse(pt.x, pt.y, 16, 16);
       pop();
     }
   }
 }
 
-function drawPoseLine(keypoints, nameA, nameB, col) {
+function drawPoseLineSimple(keypoints, nameA, nameB) {
   let a = getKeypointByName(keypoints, nameA);
   let b = getKeypointByName(keypoints, nameB);
 
@@ -293,8 +408,8 @@ function drawPoseLine(keypoints, nameA, nameB, col) {
   let pb = poseToCanvas(b);
 
   push();
-  stroke(col[0], col[1], col[2]);
-  strokeWeight(7);
+  stroke(255, 210);
+  strokeWeight(5);
   line(pa.x, pa.y, pb.x, pb.y);
   pop();
 }
@@ -321,49 +436,42 @@ function poseToCanvas(kp) {
   };
 }
 
-function getPeople() {
-  if (!segmentation || !segmentation.maskImageData) return [];
+function checkCollisionWithPeopleCircles(s, peopleWithModes) {
+  if (!peopleWithModes || peopleWithModes.length === 0) return false;
+  if (s.state !== "ghost") return false;
 
-  let data = segmentation.maskImageData.data;
-  let points = [];
-  let step = 20;
+  let spiritCenterX = s.x + GHOST_SIZE / 2;
+  let spiritCenterY = s.y + GHOST_SIZE / 2;
 
-  for (let i = 0; i < data.length; i += 4 * step) {
-    if (data[i + 3] > 128) {
-      let idx = i / 4;
-      let x = idx % video.width;
-      let y = floor(idx / video.width);
-      points.push({ x, y });
+  for (let p of peopleWithModes) {
+    let d = dist(spiritCenterX, spiritCenterY, p.x, p.y);
+    if (d < PERSON_CIRCLE_RADIUS + GHOST_SIZE / 2) {
+      return true;
     }
   }
 
-  if (points.length === 0) return [];
+  return false;
+}
 
-  let clusters = [];
-  let threshold = 250;
+function getClosestEligiblePerson(s, peopleWithModes) {
+  if (!peopleWithModes.length) return null;
 
-  for (let p of points) {
-    let found = false;
-    for (let c of clusters) {
-      if (dist(p.x, p.y, c.x, c.y) < threshold) {
-        c.x = (c.x * c.count + p.x) / (c.count + 1);
-        c.y = (c.y * c.count + p.y) / (c.count + 1);
-        c.count++;
-        found = true;
-        break;
-      }
+  let wantedMode = s.species.habitat === "marine" ? "ocean" : "grass";
+
+  let closest = null;
+  let minD = Infinity;
+
+  for (let p of peopleWithModes) {
+    if (p.mode !== wantedMode) continue;
+
+    let d = dist(s.x + GHOST_SIZE / 2, s.y + GHOST_SIZE / 2, p.x, p.y);
+    if (d < minD) {
+      minD = d;
+      closest = p;
     }
-    if (!found) clusters.push({ x: p.x, y: p.y, count: 1 });
   }
 
-  let realPeople = clusters
-    .sort((a, b) => b.count - a.count)
-    .filter(c => c.count > 40);
-
-  return realPeople.map(c => ({
-    x: map(c.x, 0, video.width, width, 0),
-    y: map(c.y, 0, video.height, 0, height)
-  }));
+  return closest;
 }
 
 function startInteraction(s, p) {
@@ -422,7 +530,7 @@ function drawBubble() {
   bubbleW = constrain(bubbleW, 320, 620);
 
   let bx = constrain(activeInfo.x, bubbleW / 2 + 20, width - bubbleW / 2 - 20);
-  let by = max(activeInfo.y - 220, bubbleH / 2 + 20);
+  let by = max(activeInfo.y - 260, bubbleH / 2 + 20);
 
   fill(activeInfo.color[0], activeInfo.color[1], activeInfo.color[2], 220);
   noStroke();
@@ -505,47 +613,6 @@ function moveReleased(s) {
   }
 }
 
-function checkCollision(s) {
-  if (!segmentation || !segmentation.maskImageData) return false;
-  if (s.state !== "ghost") return false;
-
-  let data = segmentation.maskImageData.data;
-  let stepSize = 10;
-
-  for (let x = s.x; x < s.x + 100; x += stepSize) {
-    for (let y = s.y; y < s.y + 100; y += stepSize) {
-      let vx = map(x, width, 0, 0, video.width);
-      let vy = map(y, 0, height, 0, video.height);
-
-      vx = floor(vx);
-      vy = floor(vy);
-
-      let index = (vy * video.width + vx) * 4;
-      let alpha = data[index + 3];
-
-      if (alpha > 128) return true;
-    }
-  }
-
-  return false;
-}
-
-function getClosestPerson(s, people) {
-  if (!people.length) return null;
-
-  let closest = null;
-  let minD = Infinity;
-
-  for (let p of people) {
-    let d = dist(s.x, s.y, p.x, p.y);
-    if (d < minD) {
-      minD = d;
-      closest = p;
-    }
-  }
-  return closest;
-}
-
 function drawPeopleCounter(n) {
   push();
   fill(255);
@@ -602,6 +669,7 @@ function drawCropMarks() {
 function resetAll() {
   startTime = millis();
   activeInfo = null;
+  personModes = [];
 
   for (let s of spirits) {
     s.state = "ghost";
@@ -649,11 +717,15 @@ class Spirit {
 
   display() {
     if (!this.img) return;
+
     if (this.state === "ghost") {
-      image(this.img, this.x, this.y,100,100);
-    } else{
-      this.img.resize(400,0);
-      image(this.img, this.x, this.y);
+      image(this.img, this.x, this.y, GHOST_SIZE, GHOST_SIZE);
+    } else {
+      let scale = this.species.scale || 1.0;
+      let w = ANIMAL_BASE_SIZE * scale;
+      let h = ANIMAL_BASE_SIZE * scale;
+
+      image(this.img, this.x, this.y, w, h);
     }
   }
 }
