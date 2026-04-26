@@ -35,12 +35,12 @@ let personModes = []; // [{x, y, mode: "grass" | "ocean"}]
 let maxNumOfCollisions = 2;
 let peopleCollided;
 const PERSON_MODE_SMOOTH_DIST = 220;
-const PERSON_CIRCLE_RADIUS = 120;
+const PERSON_CIRCLE_RADIUS = 200;
 
 // segmentation clustering
-const SEGMENT_SAMPLE_STEP = 18;
-const SEGMENT_CLUSTER_DIST = 140;
-const SEGMENT_MIN_CLUSTER_SIZE = 25;
+const SEGMENT_SAMPLE_STEP = 10;
+const SEGMENT_CLUSTER_DIST = 400;
+const SEGMENT_MIN_CLUSTER_SIZE = 40;
 
 // animal size
 const GHOST_SIZE = 60;
@@ -189,7 +189,6 @@ function draw() {
   if (millis() - startTime > RESET_TIME) resetAll();
 
   background(0);
-
   drawCameraBW();
 
   let people = getPeopleFromSegmentation();
@@ -198,26 +197,47 @@ function draw() {
   drawPersonTextureCircles();
   drawDigitalSkeletonsSimple();
 
+  // Flag to prevent multiple ghosts grabbing the same person in one frame
+  let personClaimedThisFrame = []; 
+
   for (let s of spirits) {
     s.update();
 
     if (s.state === "ghost") {
-      // 1. Find if there is an empty slot available (0 or 1)
       let emptySlotIndex = activeInfo.indexOf(null);
 
-      // 2. Only check collisions if a slot is free
+      // Only check collisions if there is room for a new animal
       if (emptySlotIndex !== -1 && checkCollisionWithPeopleCircles(s, personModes)) {
         let p = getClosestEligiblePerson(s, personModes);
-        if (p) { 
-          // We found a person and have a slot!
-          peopleCollided++;
-          startInteraction(s, p); 
+        
+        if (p) {
+          // --- BUSY CHECK ---
+          let personIsBusy = false;
+          
+          // Check if person is already in a slot
+          for (let info of activeInfo) {
+            if (info && info.spirit && info.spirit.target) {
+              if (dist(p.x, p.y, info.spirit.target.x, info.spirit.target.y) < 400) {
+                personIsBusy = true;
+                break;
+              }
+            }
+          }
+
+          // Check if another ghost JUST grabbed this person this frame
+          for (let claimedP of personClaimedThisFrame) {
+            if (dist(p.x, p.y, claimedP.x, claimedP.y) < 200) {
+              personIsBusy = true;
+              break;
+            }
+          }
+
+          if (!personIsBusy) { 
+            personClaimedThisFrame.push(p);
+            startInteraction(s, p); 
+          }
         }
       }
-    }
-
-    if (activeInfo) { 
-      showInfoPanel(); 
     }
 
     if (s.state === "attached") moveAttached(s);
@@ -226,12 +246,57 @@ function draw() {
     s.display();
   }
 
+  // Draw UI elements
+  showInfoPanel();
   updateInfo();
   drawBubble();
 
   drawPeopleCounter(people.length);
   drawCountdownTimer();
   drawCropMarks();
+}
+
+// --- UPDATED START INTERACTION ---
+function startInteraction(s, p) {
+  let slotIndex = activeInfo.indexOf(null);
+  if (slotIndex !== -1) {
+    s.state = "attached";
+    s.target = p;
+    s.img = s.species.img;
+
+    activeInfo[slotIndex] = {
+      spirit: s,
+      start: millis(),
+      sentences: s.species.info,
+      color: s.species.bubbleColor,
+      x: p.x,
+      y: p.y
+    };
+    recalculateCollisions();
+  }
+}
+
+// --- UPDATED UPDATE INFO (Safely clears targets) ---
+function updateInfo() {
+  for (let i = 0; i < activeInfo.length; i++) {
+    let info = activeInfo[i];
+    if (!info) continue;
+
+    if (info.spirit && info.spirit.target) {
+      info.x = info.spirit.target.x;
+      info.y = info.spirit.target.y;
+    }
+
+    if (millis() - info.start > INFO_TOTAL_DURATION) {
+      if (info.spirit) {
+        info.spirit.state = "released";
+        info.spirit.releaseStartTime = millis();
+        info.spirit.target = null;
+      }
+      activeInfo[i] = null; 
+      recalculateCollisions();
+    }
+  }
 }
 
 function drawCameraBW() {
@@ -258,7 +323,7 @@ function getPeopleFromSegmentation() {
       let idx = (y * video.width + x) * 4;
       let alpha = data[idx + 3];
 
-      if (alpha > 120) {
+      if (alpha > 50) {
         points.push({ x, y });
       }
     }
@@ -491,58 +556,6 @@ function getClosestEligiblePerson(s, peopleWithModes) {
   return closest;
 }
 
-function startInteraction(s, p) {
-  s.state = "attached";
-  s.target = p;
-  s.img = s.species.img;
-
-  let slotIndex = activeInfo.indexOf(null);
-  if (slotIndex !== -1) {
-      activeInfo[slotIndex] = {
-      spirit: s,
-      start: millis(),
-      sentences: s.species.info,
-      color: s.species.bubbleColor,
-      x: p.x,
-      y: p.y
-    };
-  }
-}
-
-function updateInfo() {
-  // Loop through our two slots: 0 and 1
-  for (let i = 0; i < activeInfo.length; i++) {
-    let info = activeInfo[i];
-
-    // 1. If the slot is empty, skip it
-    if (!info) continue;
-
-    // 2. Safety check: make sure the spirit actually exists in this info object
-    if (info.spirit && info.spirit.target) {
-      // Keep the bubble following the person
-      info.x = info.spirit.target.x;
-      info.y = info.spirit.target.y;
-    }
-
-    // 3. Timer Check
-    if (millis() - info.start > INFO_TOTAL_DURATION) {
-      // Only release if the spirit exists
-      if (info.spirit) {
-        info.spirit.state = "released";
-        info.spirit.releaseStartTime = millis();
-        info.spirit.target = null;
-      }
-
-      // 4. CLEAR THE SLOT PROPERLY
-      activeInfo[i] = null; 
-
-      // 5. DON'T rely on peopleCollided for the loop logic
-      // Instead of peopleCollided--, let's just recalculate it based on reality
-      recalculateCollisions();
-    }
-  }
-}
-
 // Helper function to keep our count honest
 function recalculateCollisions() {
   let count = 0;
@@ -640,9 +653,32 @@ function makeForcedTwoLineText(str, maxLineWidth = 420) {
 }
 
 function moveAttached(s) {
-  if (!s.target) return;
-  s.x = lerp(s.x, s.target.x - 50, 0.1);
-  s.y = lerp(s.y, s.target.y - 50, 0.1);
+  // 1. Find the person in the current 'personModes' list that is closest to where the spirit is
+  let closestP = null;
+  let minDist = 500; // Only look within a reasonable range
+
+  for (let p of personModes) {
+    let d = dist(s.x + (ANIMAL_BASE_SIZE * s.species.scale)/2, 
+                 s.y + (ANIMAL_BASE_SIZE * s.species.scale)/2, 
+                 p.x, p.y);
+    if (d < minDist) {
+      minDist = d;
+      closestP = p;
+    }
+  }
+
+  // 2. If we found them, update the target and move
+  if (closestP) {
+    s.target = closestP; // Keep the reference fresh
+    
+    let scale = s.species.scale || 1.0;
+    let w = ANIMAL_BASE_SIZE * scale;
+    let h = ANIMAL_BASE_SIZE * scale;
+
+    // Hard-lock the position to the center of the circle
+    s.x = closestP.x - w / 2;
+    s.y = closestP.y - h / 2;
+  }
 }
 
 function moveReleased(s) {
@@ -669,9 +705,9 @@ function moveReleased(s) {
 
 function drawPeopleCounter(n) {
   push();
-  fill(255);
+  fill(0);
   noStroke();
-  textSize(40);
+  textSize(50);
   textAlign(LEFT, TOP);
   text("People: " + n, 50, 50);
   pop();
@@ -765,7 +801,7 @@ function showInfoPanel() {
 
 function resetAll() {
   startTime = millis();
-  activeInfo = null;
+  activeInfo = [null,null];
   personModes = [];
 
   for (let s of spirits) {
