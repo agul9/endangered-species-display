@@ -27,11 +27,13 @@ let spirits = [];
 const GHOST_COUNT = 30;
 
 let speciesData = [];
-let activeInfo = null;
+let activeInfo = [null,null];
 
 let startTime;
 
 let personModes = []; // [{x, y, mode: "grass" | "ocean"}]
+let maxNumOfCollisions = 2;
+let peopleCollided;
 const PERSON_MODE_SMOOTH_DIST = 220;
 const PERSON_CIRCLE_RADIUS = 120;
 
@@ -153,6 +155,8 @@ function preload() {
 function setup() {
   createCanvas(3072, 1280);
 
+  peopleCollided = 0; 
+
   video = createCapture(VIDEO);
   video.size(640, 480);
   video.hide();
@@ -198,10 +202,22 @@ function draw() {
     s.update();
 
     if (s.state === "ghost") {
-      if (!activeInfo && checkCollisionWithPeopleCircles(s, personModes)) {
+      // 1. Find if there is an empty slot available (0 or 1)
+      let emptySlotIndex = activeInfo.indexOf(null);
+
+      // 2. Only check collisions if a slot is free
+      if (emptySlotIndex !== -1 && checkCollisionWithPeopleCircles(s, personModes)) {
         let p = getClosestEligiblePerson(s, personModes);
-        if (p) startInteraction(s, p);
+        if (p) { 
+          // We found a person and have a slot!
+          peopleCollided++;
+          startInteraction(s, p); 
+        }
       }
+    }
+
+    if (activeInfo) { 
+      showInfoPanel(); 
     }
 
     if (s.state === "attached") moveAttached(s);
@@ -344,8 +360,9 @@ function drawPersonTextureCircles() {
 
     drawingContext.restore();
 
-    stroke(255, 160);
-    strokeWeight(4);
+    //stroke(255, 160);
+    //strokeWeight(4);
+    noStroke();
     noFill();
     ellipse(p.x, p.y, PERSON_CIRCLE_RADIUS * 2, PERSON_CIRCLE_RADIUS * 2);
 
@@ -479,75 +496,112 @@ function startInteraction(s, p) {
   s.target = p;
   s.img = s.species.img;
 
-  activeInfo = {
-    spirit: s,
-    start: millis(),
-    sentences: s.species.info,
-    color: s.species.bubbleColor,
-    x: p.x,
-    y: p.y
-  };
+  let slotIndex = activeInfo.indexOf(null);
+  if (slotIndex !== -1) {
+      activeInfo[slotIndex] = {
+      spirit: s,
+      start: millis(),
+      sentences: s.species.info,
+      color: s.species.bubbleColor,
+      x: p.x,
+      y: p.y
+    };
+  }
 }
 
 function updateInfo() {
-  if (!activeInfo) return;
+  // Loop through our two slots: 0 and 1
+  for (let i = 0; i < activeInfo.length; i++) {
+    let info = activeInfo[i];
 
-  if (activeInfo.spirit && activeInfo.spirit.target) {
-    activeInfo.x = activeInfo.spirit.target.x;
-    activeInfo.y = activeInfo.spirit.target.y;
-  }
+    // 1. If the slot is empty, skip it
+    if (!info) continue;
 
-  if (millis() - activeInfo.start > INFO_TOTAL_DURATION) {
-    activeInfo.spirit.state = "released";
-    activeInfo.spirit.releaseStartTime = millis();
-    activeInfo.spirit.target = null;
-    activeInfo = null;
+    // 2. Safety check: make sure the spirit actually exists in this info object
+    if (info.spirit && info.spirit.target) {
+      // Keep the bubble following the person
+      info.x = info.spirit.target.x;
+      info.y = info.spirit.target.y;
+    }
+
+    // 3. Timer Check
+    if (millis() - info.start > INFO_TOTAL_DURATION) {
+      // Only release if the spirit exists
+      if (info.spirit) {
+        info.spirit.state = "released";
+        info.spirit.releaseStartTime = millis();
+        info.spirit.target = null;
+      }
+
+      // 4. CLEAR THE SLOT PROPERLY
+      activeInfo[i] = null; 
+
+      // 5. DON'T rely on peopleCollided for the loop logic
+      // Instead of peopleCollided--, let's just recalculate it based on reality
+      recalculateCollisions();
+    }
   }
 }
 
+// Helper function to keep our count honest
+function recalculateCollisions() {
+  let count = 0;
+  for (let slot of activeInfo) {
+    if (slot !== null) count++;
+  }
+  peopleCollided = count;
+}
+
 function drawBubble() {
-  if (!activeInfo) return;
+  // Now we loop through the two slots in the array
+  for (let info of activeInfo) {
+    // Skip the slot if it's empty (null)
+    if (!info) continue;
 
-  let t = millis() - activeInfo.start;
-  let i = floor(t / SENTENCE_DURATION);
-  i = constrain(i, 0, activeInfo.sentences.length - 1);
+    let t = millis() - info.start;
+    let i = floor(t / SENTENCE_DURATION);
+    
+    // Safety check for the sentence index
+    i = constrain(i, 0, info.sentences.length - 1);
 
-  let textStr = activeInfo.sentences[i];
+    let textStr = info.sentences[i];
 
-  push();
-  textSize(36);
-  textAlign(CENTER, CENTER);
-  textLeading(46);
+    push();
+    textSize(36);
+    textAlign(CENTER, CENTER);
+    textLeading(46);
 
-  let lines = makeForcedTwoLineText(textStr, 420);
-  let line1 = lines[0];
-  let line2 = lines[1];
+    let lines = makeForcedTwoLineText(textStr, 420);
+    let line1 = lines[0];
+    let line2 = lines[1];
 
-  let longest = max(textWidth(line1), textWidth(line2));
-  let bubbleW = longest + 120;
-  let bubbleH = 150;
+    let longest = max(textWidth(line1), textWidth(line2));
+    let bubbleW = constrain(longest + 120, 320, 620);
+    let bubbleH = 150;
 
-  bubbleW = constrain(bubbleW, 320, 620);
+    // Use the coordinates of the specific animal/person for this slot
+    let bx = constrain(info.x, bubbleW / 2 + 20, width - bubbleW / 2 - 20);
+    let by = max(info.y - 260, bubbleH / 2 + 20);
 
-  let bx = constrain(activeInfo.x, bubbleW / 2 + 20, width - bubbleW / 2 - 20);
-  let by = max(activeInfo.y - 260, bubbleH / 2 + 20);
+    // Draw bubble tail
+    fill(info.color[0], info.color[1], info.color[2], 220);
+    noStroke();
+    triangle(
+      bx - 24, by + bubbleH / 2 - 6,
+      bx + 24, by + bubbleH / 2 - 6,
+      bx,      by + bubbleH / 2 + 30
+    );
 
-  fill(activeInfo.color[0], activeInfo.color[1], activeInfo.color[2], 220);
-  noStroke();
-  rectMode(CENTER);
-  rect(bx, by, bubbleW, bubbleH, 24);
+    // Draw bubble body
+    rectMode(CENTER);
+    rect(bx, by, bubbleW, bubbleH, 24);
 
-  triangle(
-    bx - 24, by + bubbleH / 2 - 6,
-    bx + 24, by + bubbleH / 2 - 6,
-    bx,      by + bubbleH / 2 + 30
-  );
-
-  fill(255);
-  text(line1, bx, by - 22);
-  text(line2, bx, by + 22);
-
-  pop();
+    // Draw text
+    fill(255);
+    text(line1, bx, by - 22);
+    text(line2, bx, by + 22);
+    pop();
+  }
 }
 
 function makeForcedTwoLineText(str, maxLineWidth = 420) {
@@ -666,6 +720,49 @@ function drawCropMarks() {
   pop();
 }
 
+function showInfoPanel() {
+  // We loop through our 2 slots
+  for (let i = 0; i < activeInfo.length; i++) {
+    let info = activeInfo[i];
+    
+    // Position logic: Slot 0 (Left), Slot 1 (Right)
+    let x = (i === 0) ? 80 : width - 680; 
+    let y = 100;
+    let w = 600;
+    let h = 350;
+
+    if (info) {
+      // --- DRAW THE ACTIVE PANEL ---
+      let species = info.spirit.species;
+      
+      push();
+      // Background Box
+      fill(0, 180);
+      stroke(info.color);
+      strokeWeight(4);
+      rect(x, y, w, h, 20);
+      
+      // Species Name
+      noStroke();
+      fill(info.color);
+      textSize(45);
+      text(species.info[0], x + 30, y + 60);
+      
+      // Habitat Info
+      fill(255);
+      textSize(25);
+      text("REGION: Georgia, USA", x + 30, y + 110);
+      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 145);
+      
+      // Big Animal Image
+      imageMode(CENTER);
+      image(species.img, x + w/2, y + 240, 200, 200);
+      pop();
+
+    }
+  }
+}
+
 function resetAll() {
   startTime = millis();
   activeInfo = null;
@@ -719,7 +816,10 @@ class Spirit {
     if (!this.img) return;
 
     if (this.state === "ghost") {
+      push();
+      tint(255,150);
       image(this.img, this.x, this.y, GHOST_SIZE, GHOST_SIZE);
+      pop();
     } else {
       let scale = this.species.scale || 1.0;
       let w = ANIMAL_BASE_SIZE * scale;
