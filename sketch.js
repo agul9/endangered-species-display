@@ -56,7 +56,7 @@ function preload() {
   let gopherTortoiseImg = loadImage("assets/animals/tortoise2.gif");
   let redCockadedWoodpeckerImg = loadImage("assets/animals/woodpecker2.gif");
   let westIndianManateeImg = loadImage("assets/animals/WestIndianManatee.png");
-  let loggerHeadSeaTurtleImg = loadImage("assets/animals/LoggerHeadSeaTurtle.png");
+  let loggerHeadSeaTurtleImg = loadImage("assets/animals/sea turtle3.gif");
   let woodStorkImg = loadImage("assets/animals/WoodStork.png");
   let etowahDarterImg = loadImage("assets/animals/EtowahDarter.png");
 
