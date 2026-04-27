@@ -53,8 +53,8 @@ function preload() {
   constructionBg = loadImage("assets/construction.png");
 
   let northAtlanticRightWhaleImg = loadImage("assets/animals/northAtlanticRightWhale.png");
-  let gopherTortoiseImg = loadImage("assets/animals/gopherTortoise.png");
-  let redCockadedWoodpeckerImg = loadImage("assets/animals/RedCockadedWoodpecker.png");
+  let gopherTortoiseImg = loadImage("assets/animals/tortoise2.gif");
+  let redCockadedWoodpeckerImg = loadImage("assets/animals/woodpecker2.gif");
   let westIndianManateeImg = loadImage("assets/animals/WestIndianManatee.png");
   let loggerHeadSeaTurtleImg = loadImage("assets/animals/LoggerHeadSeaTurtle.png");
   let woodStorkImg = loadImage("assets/animals/WoodStork.png");
@@ -66,6 +66,7 @@ function preload() {
       habitat: "marine",
       scale: 9.10, // biggest
       bubbleColor: [70, 110, 190],
+      name: "North Atlantic Right Whale",
       info: [
         "Hi! I'm the North Atlantic Right Whale.",
         "I live in the coastal waters of Georgia during the winter to have my calves.",
@@ -76,6 +77,7 @@ function preload() {
     {
       img: gopherTortoiseImg,
       habitat: "land",
+      name: "Gopher Tortoise",
       scale: 1.5,
       bubbleColor: [181, 126, 62],
       info: [
@@ -88,6 +90,7 @@ function preload() {
     {
       img: redCockadedWoodpeckerImg,
       habitat: "land",
+      name: "Red-cockaded Woodpecker",
       scale: 0.5, // small bird
       bubbleColor: [176, 63, 63],
       info: [
@@ -100,6 +103,7 @@ function preload() {
     {
       img: westIndianManateeImg,
       habitat: "marine",
+      name: "West Indian Manatee",
       scale: 1.9,
       bubbleColor: [74, 145, 134],
       info: [
@@ -112,6 +116,7 @@ function preload() {
     {
       img: loggerHeadSeaTurtleImg,
       habitat: "marine",
+      name: "Loggerhead Sea Turtle",
       scale: 2.7,
       bubbleColor: [88, 140, 86],
       info: [
@@ -124,6 +129,7 @@ function preload() {
     {
       img: woodStorkImg,
       habitat: "land",
+      name: "Wood Stork",
       scale: 1.8, // medium bird
       bubbleColor: [120, 120, 120],
       info: [
@@ -136,6 +142,7 @@ function preload() {
     {
       img: etowahDarterImg,
       habitat: "marine",
+      name: "Etowah Darter",
       scale: 0.5, // small fish
       bubbleColor: [140, 88, 170],
       info: [
@@ -249,7 +256,7 @@ function draw() {
   // Draw UI elements
   showInfoPanel();
   updateInfo();
-  drawBubble();
+  //drawBubble();
 
   drawPeopleCounter(people.length);
   drawCountdownTimer();
@@ -765,7 +772,7 @@ function showInfoPanel() {
     let x = (i === 0) ? 80 : width - 680; 
     let y = 100;
     let w = 600;
-    let h = 350;
+    let h = height - 200;
 
     if (info) {
       // --- DRAW THE ACTIVE PANEL ---
@@ -781,18 +788,20 @@ function showInfoPanel() {
       // Species Name
       noStroke();
       fill(info.color);
-      textSize(45);
-      text(species.info[0], x + 30, y + 60);
+      textSize(50);
+      textStyle(BOLD);
+      text(species.name, x + 30, y + 50, 400);
       
       // Habitat Info
       fill(255);
-      textSize(25);
-      text("REGION: Georgia, USA", x + 30, y + 110);
-      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 145);
+      textSize(30);
+      textStyle(NORMAL);
+      text("REGION: Georgia, USA", x + 30, y + 200);
+      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 250);
       
       // Big Animal Image
       imageMode(CENTER);
-      image(species.img, x + w/2, y + 240, 200, 200);
+      image(species.img, x + w/2, y + 400, 200, 200);
       pop();
 
     }
