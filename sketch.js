@@ -796,13 +796,19 @@ function showInfoPanel() {
       fill(255);
       textSize(30);
       textStyle(NORMAL);
-      text("REGION: Georgia, USA", x + 30, y + 200);
-      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 250);
+      text("REGION: Georgia, USA", x + 30, y + 300);
+      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 350);
+
+      // description
+      fill(255);
+      textSize(28);
+      textStyle(NORMAL);
+      text(species.info, x + 30, y + 400, 550);
       
       // Big Animal Image
-      imageMode(CENTER);
-      image(species.img, x + w/2, y + 400, 200, 200);
-      pop();
+      // imageMode(CENTER);
+      // image(species.img, x + w/2, y + 400, 200, 200);
+      // pop();
 
     }
   }
