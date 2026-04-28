@@ -282,7 +282,7 @@ function startInteraction(s, p) {
     recalculateCollisions();
   }
 }
-
+//dd
 // --- UPDATED UPDATE INFO (Safely clears targets) ---
 function updateInfo() {
   for (let i = 0; i < activeInfo.length; i++) {
