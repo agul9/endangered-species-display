@@ -246,6 +246,7 @@ function draw() {
 
           for (let info of activeInfo) {
             if (info && info.spirit && info.spirit.target) {
+              // maybe change to 600 on bridge if ppl are getting multiple animals
               if (dist(p.x, p.y, info.spirit.target.x, info.spirit.target.y) < 400) {
                 personIsBusy = true;
                 break;
@@ -254,6 +255,7 @@ function draw() {
           }
 
           for (let claimedP of personClaimedThisFrame) {
+            // maybe change to 600 on bridge if ppl are getting multiple animals
             if (dist(p.x, p.y, claimedP.x, claimedP.y) < 200) {
               personIsBusy = true;
               break;
