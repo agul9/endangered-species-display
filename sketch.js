@@ -12,6 +12,10 @@ let video;
 let bodySegmentation;
 let segmentation;
 
+let maskBuf, tempG, bigGrassMask, bigOceanMask;
+
+let silhouetteTrailBuffer;
+
 let bodyPose;
 let poses = [];
 
@@ -35,11 +39,11 @@ let maxNumOfCollisions = 2;
 let peopleCollided;
 
 const PERSON_MODE_SMOOTH_DIST = 220;
-const PERSON_CIRCLE_RADIUS = 200;
+const PERSON_CIRCLE_RADIUS = 150; // 200 for laptop, 150 for bridge
 
 const SEGMENT_SAMPLE_STEP = 10;
-const SEGMENT_CLUSTER_DIST = 400;
-const SEGMENT_MIN_CLUSTER_SIZE = 40;
+const SEGMENT_CLUSTER_DIST = 300; // 300 for bridge, 450 for laptop
+const SEGMENT_MIN_CLUSTER_SIZE = 15; // change to 15 when testing on bridge, 150 for laptop
 
 const GHOST_SIZE = 60;
 const ANIMAL_BASE_SIZE = 220;
@@ -152,13 +156,18 @@ function preload() {
     }
   ];
 
-  bodySegmentation = ml5.bodySegmentation("SelfieSegmentation", {
-    maskType: "background"
+  bodySegmentation = ml5.bodySegmentation("BodyPix", {
+    maskType: "body", 
+    architecture: 'MobileNetV1', 
+    outputStride: 16, 
+    multiplier: 0.75, 
+    quantBytes: 2
   });
 }
 
 function setup() {
   createCanvas(3072, 1280);
+  pixelDensity(1);
 
   peopleCollided = 0;
 
@@ -166,7 +175,17 @@ function setup() {
   video.size(640, 480);
   video.hide();
 
+  maskBuf = createGraphics(640, 480);
+  maskBuf.pixelDensity(1);
+  
+  tempG = createGraphics(width, height);
+  tempG.pixelDensity(1);
+
   bgBuffer = createGraphics(width, height);
+
+  silhouetteTrailBuffer = createGraphics(width, height);
+  silhouetteTrailBuffer.pixelDensity(1); // <--- THIS FIXES THE CORNER ISSUE
+  silhouetteTrailBuffer.clear();
 
   bodySegmentation.detectStart(video, (res) => {
     segmentation = res;
@@ -201,6 +220,14 @@ function draw() {
   updatePersonModes(people);
 
   drawPersonTextureSilhouettes();
+
+  // --- ADD THIS LOOP HERE ---
+  if (poses && poses.length > 0) {
+    for (let pose of poses) {
+      drawSkeletonSilhouette(pose); 
+    }
+  }
+
   drawDigitalSkeletonsSimple();
 
   let personClaimedThisFrame = [];
@@ -313,17 +340,21 @@ function drawCameraBW() {
 }
 
 function getPeopleFromSegmentation() {
-  if (!segmentation || !segmentation.maskImageData) return [];
+  // BodyPix uses .data instead of .maskImageData
+  if (!segmentation || !segmentation.data) return [];
 
-  let data = segmentation.maskImageData.data;
   let points = [];
+  
+  // Use a smaller step (8 or 10) for better detail on the bridge
+  let step = 10; 
 
-  for (let y = 0; y < video.height; y += SEGMENT_SAMPLE_STEP) {
-    for (let x = 0; x < video.width; x += SEGMENT_SAMPLE_STEP) {
-      let idx = (y * video.width + x) * 4;
-      let alpha = data[idx + 3];
+  for (let y = 0; y < video.height; y += step) {
+    for (let x = 0; x < video.width; x += step) {
+      let index = y * video.width + x;
+      let pixelValue = segmentation.data[index];
 
-      if (alpha > 50) {
+      // In BodyPix, -1 is background, 0 and up is a person
+      if (pixelValue !== -1) { 
         points.push({ x, y });
       }
     }
@@ -332,11 +363,10 @@ function getPeopleFromSegmentation() {
   if (points.length === 0) return [];
 
   let clusters = [];
-
   for (let p of points) {
     let found = false;
-
     for (let c of clusters) {
+      // Keep this around 200-300 so people don't "merge" on the bridge
       if (dist(p.x, p.y, c.x, c.y) < SEGMENT_CLUSTER_DIST) {
         c.x = (c.x * c.count + p.x) / (c.count + 1);
         c.y = (c.y * c.count + p.y) / (c.count + 1);
@@ -345,16 +375,13 @@ function getPeopleFromSegmentation() {
         break;
       }
     }
-
     if (!found) {
-      clusters.push({
-        x: p.x,
-        y: p.y,
-        count: 1
-      });
+      clusters.push({ x: p.x, y: p.y, count: 1 });
     }
   }
 
+  // Set SEGMENT_MIN_CLUSTER_SIZE to a low number (like 10 or 15) 
+  // since people far away occupy fewer "points"
   let realPeople = clusters.filter(c => c.count >= SEGMENT_MIN_CLUSTER_SIZE);
 
   return realPeople.map(c => ({
@@ -368,23 +395,31 @@ function updatePersonModes(people) {
 
   for (let p of people) {
     let matched = null;
-    let minD = Infinity;
+    let minD = 500; // Look in a wide radius to find the "old" you
 
     for (let old of personModes) {
       let d = dist(p.x, p.y, old.x, old.y);
-      if (d < PERSON_MODE_SMOOTH_DIST && d < minD) {
+      if (d < minD) {
         minD = d;
         matched = old;
       }
     }
 
     if (matched) {
+      // Keep the same mode (grass/water) you already had!
       updated.push({
         x: p.x,
         y: p.y,
-        mode: matched.mode
+        mode: matched.mode 
       });
+      
+      // Remove the matched person from personModes so two clusters 
+      // don't "steal" the same identity in one frame
+      let idx = personModes.indexOf(matched);
+      personModes.splice(idx, 1);
+      
     } else {
+      // ONLY if we can't find a match, create a new person
       updated.push({
         x: p.x,
         y: p.y,
@@ -403,79 +438,48 @@ function updatePersonModes(people) {
 
 function drawPersonTextureSilhouettes() {
   if (!segmentation || !segmentation.maskImageData) return;
-  if (!personModes || personModes.length === 0) return;
 
+  // 1. Update the mask
+  maskBuf.clear();
   let maskData = segmentation.maskImageData.data;
-
-  let grassMask = createImage(video.width, video.height);
-  let oceanMask = createImage(video.width, video.height);
-
-  grassMask.loadPixels();
-  oceanMask.loadPixels();
-
-  for (let y = 0; y < video.height; y++) {
-    for (let x = 0; x < video.width; x++) {
-      let idx = (y * video.width + x) * 4;
-      let alpha = maskData[idx + 3];
-
-      grassMask.pixels[idx] = 255;
-      grassMask.pixels[idx + 1] = 255;
-      grassMask.pixels[idx + 2] = 255;
-      grassMask.pixels[idx + 3] = 0;
-
-      oceanMask.pixels[idx] = 255;
-      oceanMask.pixels[idx + 1] = 255;
-      oceanMask.pixels[idx + 2] = 255;
-      oceanMask.pixels[idx + 3] = 0;
-
-      if (alpha > 50) {
-        let canvasX = map(x, 0, video.width, width, 0);
-        let canvasY = map(y, 0, video.height, 0, height);
-
-        let closest = getClosestPersonMode(canvasX, canvasY);
-
-        if (closest) {
-          if (closest.mode === "grass") {
-            grassMask.pixels[idx + 3] = alpha;
-          } else {
-            oceanMask.pixels[idx + 3] = alpha;
-          }
-        }
-      }
-    }
+  maskBuf.loadPixels();
+  for (let i = 0; i < maskData.length; i += 4) {
+    maskBuf.pixels[i] = 255;
+    maskBuf.pixels[i + 1] = 255;
+    maskBuf.pixels[i + 2] = 255;
+    maskBuf.pixels[i + 3] = maskData[i + 3];
   }
+  maskBuf.updatePixels();
 
-  grassMask.updatePixels();
-  oceanMask.updatePixels();
+  // 2. Prepare tempG (The Cookie Cutter)
+  tempG.clear();
+  tempG.push();
+  tempG.translate(width, 0);
+  tempG.scale(-1, 1);
+  tempG.image(maskBuf, 0, 0, width, height); 
+  
+  // Use 'source-in' to make sure the grass only appears in the white mask
+  tempG.drawingContext.globalCompositeOperation = 'source-in';
+  
+  let currentMode = (personModes.length > 0) ? personModes[0].mode : "grass";
+  let tex = (currentMode === "ocean") ? oceanBg : prettyBg;
+  tempG.image(tex, 0, 0, width, height);
+  tempG.pop();
 
-  let grassTexture = createImage(width, height);
-  grassTexture.copy(prettyBg, 0, 0, prettyBg.width, prettyBg.height, 0, 0, width, height);
+  // 3. The Trail Fix (No more fading to black!)
+  silhouetteTrailBuffer.push();
+  // This "eats" the old trail pixels slowly without adding black color
+  silhouetteTrailBuffer.drawingContext.globalCompositeOperation = 'destination-out';
+  silhouetteTrailBuffer.fill(255, 60); // 60 is the trail length. Higher = shorter trail.
+  silhouetteTrailBuffer.rect(0, 0, width, height);
+  
+  // Switch back to normal to draw the new silhouette
+  silhouetteTrailBuffer.drawingContext.globalCompositeOperation = 'source-over';
+  silhouetteTrailBuffer.image(tempG, 0, 0);
+  silhouetteTrailBuffer.pop();
 
-  let oceanTexture = createImage(width, height);
-  oceanTexture.copy(oceanBg, 0, 0, oceanBg.width, oceanBg.height, 0, 0, width, height);
-
-  let bigGrassMask = createGraphics(width, height);
-  bigGrassMask.push();
-  bigGrassMask.translate(width, 0);
-  bigGrassMask.scale(-1, 1);
-  bigGrassMask.image(grassMask, 0, 0, width, height);
-  bigGrassMask.pop();
-
-  let bigOceanMask = createGraphics(width, height);
-  bigOceanMask.push();
-  bigOceanMask.translate(width, 0);
-  bigOceanMask.scale(-1, 1);
-  bigOceanMask.image(oceanMask, 0, 0, width, height);
-  bigOceanMask.pop();
-
-  let grassCutout = grassTexture.get();
-  grassCutout.mask(bigGrassMask.get());
-
-  let oceanCutout = oceanTexture.get();
-  oceanCutout.mask(bigOceanMask.get());
-
-  image(grassCutout, 0, 0);
-  image(oceanCutout, 0, 0);
+  // 4. Draw to main screen
+  image(silhouetteTrailBuffer, 0, 0);
 }
 
 function getClosestPersonMode(x, y) {
@@ -581,12 +585,28 @@ function poseToCanvas(kp) {
 }
 
 function checkCollisionWithPeopleCircles(s, peopleWithModes) {
-  if (!peopleWithModes || peopleWithModes.length === 0) return false;
   if (s.state !== "ghost") return false;
 
   let spiritCenterX = s.x + GHOST_SIZE / 2;
   let spiritCenterY = s.y + GHOST_SIZE / 2;
 
+  // 1. First, check if we hit a Skeleton (More accurate)
+  if (poses && poses.length > 0) {
+    for (let pose of poses) {
+      let nose = getKeypointByName(pose.keypoints, "nose");
+      if (isValidKeypoint(nose)) {
+        let pt = poseToCanvas(nose);
+        let d = dist(spiritCenterX, spiritCenterY, pt.x, pt.y);
+        
+        // If animal hits the head/torso area
+        if (d < 180) { 
+          return true; 
+        }
+      }
+    }
+  }
+
+  // 2. Fallback: Check the segmentation circles (In case skeleton isn't fully loaded)
   for (let p of peopleWithModes) {
     let d = dist(spiritCenterX, spiritCenterY, p.x, p.y);
     if (d < PERSON_CIRCLE_RADIUS + GHOST_SIZE / 2) {
@@ -630,32 +650,48 @@ function recalculateCollisions() {
 }
 
 function moveAttached(s) {
-  let closestP = null;
-  let minDist = 500;
+  // Use the last known position as the default target so it doesn't jump to (0,0)
+  let targetX = s.x + (ANIMAL_BASE_SIZE * (s.species.scale || 1.0)) / 2;
+  let targetY = s.y + (ANIMAL_BASE_SIZE * (s.species.scale || 1.0)) / 2;
+  let foundSomeone = false;
 
-  for (let p of personModes) {
-    let d = dist(
-      s.x + (ANIMAL_BASE_SIZE * s.species.scale) / 2,
-      s.y + (ANIMAL_BASE_SIZE * s.species.scale) / 2,
-      p.x,
-      p.y
-    );
-
-    if (d < minDist) {
-      minDist = d;
-      closestP = p;
+  // 1. Check Poses (MoveNet) - Priority 1
+  if (poses && poses.length > 0) {
+    let pose = poses[0];
+    let nose = getKeypointByName(pose.keypoints, "nose");
+    if (isValidKeypoint(nose)) {
+      let pt = poseToCanvas(nose);
+      targetX = pt.x;
+      targetY = pt.y;
+      foundSomeone = true;
     }
   }
 
-  if (closestP) {
-    s.target = closestP;
+  // 2. Check Clusters (BodyPix) - Fallback
+  if (!foundSomeone && personModes.length > 0) {
+    let closestP = getClosestPersonMode(s.x, s.y);
+    if (closestP) {
+      // ONLY follow if the person is within a reasonable distance (e.g. 600px)
+      // This stops the animal from flying across the screen to "ghost" noise
+      if (dist(s.x, s.y, closestP.x, closestP.y) < 600) {
+        targetX = closestP.x;
+        targetY = closestP.y;
+        foundSomeone = true;
+      }
+    }
+  }
 
+  // 3. Move the animal ONLY if someone was actually found
+  if (foundSomeone) {
     let scale = s.species.scale || 1.0;
     let w = ANIMAL_BASE_SIZE * scale;
     let h = ANIMAL_BASE_SIZE * scale;
 
-    s.x = closestP.x - w / 2;
-    s.y = closestP.y - h / 2;
+    // We LERP toward the center of the person
+    s.x = lerp(s.x, targetX - w / 2, 0.15);
+    s.y = lerp(s.y, targetY - h / 2, 0.15);
+  } else {
+    // If no one is found, the animal stays put! No jumping.
   }
 }
 
@@ -679,6 +715,43 @@ function moveReleased(s) {
     s.vx = random(-1.5, 1.5);
     s.vy = random(-1.5, 1.5);
   }
+}
+
+function drawSkeletonSilhouette(pose) {
+  let keypoints = pose.keypoints;
+  push();
+  
+  // A soft, digital "glow" for the social justice theme
+  fill(255, 255, 255, 40); 
+  noStroke();
+  
+  // 1. Draw Head
+  let nose = getKeypointByName(keypoints, "nose");
+  if (isValidKeypoint(nose)) {
+    let pt = poseToCanvas(nose);
+    ellipse(pt.x, pt.y - 20, 100, 130); 
+  }
+
+  // 2. Draw Torso
+  let lS = getKeypointByName(keypoints, "left_shoulder");
+  let rS = getKeypointByName(keypoints, "right_shoulder");
+  let lH = getKeypointByName(keypoints, "left_hip");
+  let rH = getKeypointByName(keypoints, "right_hip");
+
+  if (isValidKeypoint(lS) && isValidKeypoint(rS) && isValidKeypoint(lH) && isValidKeypoint(rH)) {
+    let pLS = poseToCanvas(lS);
+    let pRS = poseToCanvas(rS);
+    let pLH = poseToCanvas(lH);
+    let pRH = poseToCanvas(rH);
+    
+    beginShape();
+    vertex(pLS.x, pLS.y);
+    vertex(pRS.x, pRS.y);
+    vertex(pRH.x, pRH.y);
+    vertex(pLH.x, pLH.y);
+    endShape(CLOSE);
+  }
+  pop();
 }
 
 function drawPeopleCounter(n) {
@@ -743,7 +816,7 @@ function showInfoPanel() {
     let x = i === 0 ? 80 : width - 680;
     let y = 100;
     let w = 600;
-    let h = height - 200;
+    let h = 600;
 
     if (info) {
       let species = info.spirit.species;
@@ -763,27 +836,28 @@ function showInfoPanel() {
 
       noStroke();
       fill(info.color);
-      textAlign(LEFT, TOP);
-      textSize(44);
+      textAlign(CENTER, TOP);
+      textSize(50);
       textStyle(BOLD);
-      text(species.name, x + 30, y + 40, w - 60);
+      text(species.name, x + 30, y + 40, w - 50);
+
+      // fill(255);
+      // textSize(30);
+      // textStyle(NORMAL);
+      // text("REGION: Georgia, USA", x + 30, y + 210);
+      // text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 250);
+
+      // fill(255);
+      // textSize(32);
+      // textStyle(BOLD);
+      // text("ANIMAL MESSAGE", x + 30, y + 330);
 
       fill(255);
-      textSize(28);
+      textSize(40);
       textStyle(NORMAL);
-      text("REGION: Georgia, USA", x + 30, y + 210);
-      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 250);
-
-      fill(255);
-      textSize(32);
-      textStyle(BOLD);
-      text("ANIMAL MESSAGE", x + 30, y + 330);
-
-      fill(255);
-      textSize(30);
-      textStyle(NORMAL);
+      textAlign(CENTER);
       textLeading(42);
-      text(currentSentence, x + 30, y + 390, w - 60, 260);
+      text(currentSentence, x + 30, y + 210, w - 50, 260);
 
       pop();
     }
