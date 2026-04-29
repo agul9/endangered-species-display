@@ -1,7 +1,6 @@
 // =========================
 // FULL UPDATED sketch.js
-// segmentation-center + simple skeleton version
-// animal scale by species
+// silhouette texture + sequential panel text
 // =========================
 
 const INFO_TOTAL_DURATION = 18000;
@@ -27,22 +26,21 @@ let spirits = [];
 const GHOST_COUNT = 30;
 
 let speciesData = [];
-let activeInfo = [null,null];
+let activeInfo = [null, null];
 
 let startTime;
 
-let personModes = []; // [{x, y, mode: "grass" | "ocean"}]
+let personModes = [];
 let maxNumOfCollisions = 2;
 let peopleCollided;
+
 const PERSON_MODE_SMOOTH_DIST = 220;
 const PERSON_CIRCLE_RADIUS = 200;
 
-// segmentation clustering
 const SEGMENT_SAMPLE_STEP = 10;
 const SEGMENT_CLUSTER_DIST = 400;
 const SEGMENT_MIN_CLUSTER_SIZE = 40;
 
-// animal size
 const GHOST_SIZE = 60;
 const ANIMAL_BASE_SIZE = 220;
 
@@ -64,11 +62,11 @@ function preload() {
     {
       img: northAtlanticRightWhaleImg,
       habitat: "marine",
-      scale: 9.10, // biggest
+      scale: 9.10,
       bubbleColor: [70, 110, 190],
       name: "North Atlantic Right Whale",
       info: [
-        "Hi! I'm the North Atlantic Right Whale.",
+        "\"Hi! I'm the North Atlantic Right Whale.\"",
         "I live in the coastal waters of Georgia during the winter to have my calves.",
         "I'm endangered because of vessel strikes and entanglement in fishing gear.",
         "Only about 380 of me are left in the entire world."
@@ -81,7 +79,7 @@ function preload() {
       scale: 1.5,
       bubbleColor: [181, 126, 62],
       info: [
-        "Hi! I'm the Gopher Tortoise.",
+        "\"Hi! I'm the Gopher Tortoise.\"",
         "I live in the sandy pine forests of Southern Georgia.",
         "I'm endangered because of habitat loss due to development and lack of prescribed fires.",
         "About 65 viable populations are now permanently protected in Georgia."
@@ -91,10 +89,10 @@ function preload() {
       img: redCockadedWoodpeckerImg,
       habitat: "land",
       name: "Red-cockaded Woodpecker",
-      scale: 0.5, // small bird
+      scale: 0.5,
       bubbleColor: [176, 63, 63],
       info: [
-        "Hi! I'm the Red-cockaded Woodpecker.",
+        "\"Hi! I'm the Red-cockaded Woodpecker.\"",
         "I live in old-growth pine forests in Middle and South Georgia.",
         "I'm endangered because I can only nest in living pine trees, which are being cut down.",
         "About 800 to 1,000 clusters are left in Georgia."
@@ -107,7 +105,7 @@ function preload() {
       scale: 1.9,
       bubbleColor: [74, 145, 134],
       info: [
-        "Hi! I'm the West Indian Manatee.",
+        "\"Hi! I'm the West Indian Manatee.\"",
         "I live in coastal rivers and estuaries during the warm summer months.",
         "I'm endangered because of collisions with watercraft.",
         "Several hundred of us visit Georgia's waters each year."
@@ -120,7 +118,7 @@ function preload() {
       scale: 2.7,
       bubbleColor: [88, 140, 86],
       info: [
-        "Hi! I'm the Loggerhead Sea Turtle.",
+        "\"Hi! I'm the Loggerhead Sea Turtle.\"",
         "I live on Georgia's barrier island beaches to lay my eggs.",
         "I'm endangered because of beachfront lighting and accidental capture in nets.",
         "We had over 3,000 nests recorded in Georgia recently."
@@ -130,10 +128,10 @@ function preload() {
       img: woodStorkImg,
       habitat: "land",
       name: "Wood Stork",
-      scale: 1.8, // medium bird
+      scale: 1.8,
       bubbleColor: [120, 120, 120],
       info: [
-        "Hi! I'm the Wood Stork.",
+        "\"Hi! I'm the Wood Stork.\"",
         "I live in the swamps and marshes of South Georgia.",
         "I'm endangered because of the destruction of wetlands.",
         "About 2,500 to 3,000 nesting pairs are left in Georgia."
@@ -143,10 +141,10 @@ function preload() {
       img: etowahDarterImg,
       habitat: "marine",
       name: "Etowah Darter",
-      scale: 0.5, // small fish
+      scale: 0.5,
       bubbleColor: [140, 88, 170],
       info: [
-        "Hi! I'm the Etowah Darter.",
+        "\"Hi! I'm the Etowah Darter.\"",
         "I live exclusively in the Etowah River Basin in North Georgia.",
         "I'm endangered because of water pollution and urban runoff.",
         "I am found in only a few small creek sections."
@@ -162,7 +160,7 @@ function preload() {
 function setup() {
   createCanvas(3072, 1280);
 
-  peopleCollided = 0; 
+  peopleCollided = 0;
 
   video = createCapture(VIDEO);
   video.size(640, 480);
@@ -177,6 +175,7 @@ function setup() {
   bodyPose = ml5.bodyPose("MoveNet", {
     modelType: "SINGLEPOSE_LIGHTNING"
   });
+
   bodyPose.detectStart(video, (res) => {
     poses = res;
   });
@@ -201,11 +200,10 @@ function draw() {
   let people = getPeopleFromSegmentation();
   updatePersonModes(people);
 
-  drawPersonTextureCircles();
+  drawPersonTextureSilhouettes();
   drawDigitalSkeletonsSimple();
 
-  // Flag to prevent multiple ghosts grabbing the same person in one frame
-  let personClaimedThisFrame = []; 
+  let personClaimedThisFrame = [];
 
   for (let s of spirits) {
     s.update();
@@ -213,15 +211,12 @@ function draw() {
     if (s.state === "ghost") {
       let emptySlotIndex = activeInfo.indexOf(null);
 
-      // Only check collisions if there is room for a new animal
       if (emptySlotIndex !== -1 && checkCollisionWithPeopleCircles(s, personModes)) {
         let p = getClosestEligiblePerson(s, personModes);
-        
+
         if (p) {
-          // --- BUSY CHECK ---
           let personIsBusy = false;
-          
-          // Check if person is already in a slot
+
           for (let info of activeInfo) {
             if (info && info.spirit && info.spirit.target) {
               if (dist(p.x, p.y, info.spirit.target.x, info.spirit.target.y) < 400) {
@@ -231,7 +226,6 @@ function draw() {
             }
           }
 
-          // Check if another ghost JUST grabbed this person this frame
           for (let claimedP of personClaimedThisFrame) {
             if (dist(p.x, p.y, claimedP.x, claimedP.y) < 200) {
               personIsBusy = true;
@@ -239,9 +233,9 @@ function draw() {
             }
           }
 
-          if (!personIsBusy) { 
+          if (!personIsBusy) {
             personClaimedThisFrame.push(p);
-            startInteraction(s, p); 
+            startInteraction(s, p);
           }
         }
       }
@@ -253,19 +247,17 @@ function draw() {
     s.display();
   }
 
-  // Draw UI elements
   showInfoPanel();
   updateInfo();
-  //drawBubble();
 
   drawPeopleCounter(people.length);
   drawCountdownTimer();
   drawCropMarks();
 }
 
-// --- UPDATED START INTERACTION ---
 function startInteraction(s, p) {
   let slotIndex = activeInfo.indexOf(null);
+
   if (slotIndex !== -1) {
     s.state = "attached";
     s.target = p;
@@ -279,11 +271,11 @@ function startInteraction(s, p) {
       x: p.x,
       y: p.y
     };
+
     recalculateCollisions();
   }
 }
-//dd
-// --- UPDATED UPDATE INFO (Safely clears targets) ---
+
 function updateInfo() {
   for (let i = 0; i < activeInfo.length; i++) {
     let info = activeInfo[i];
@@ -300,7 +292,8 @@ function updateInfo() {
         info.spirit.releaseStartTime = millis();
         info.spirit.target = null;
       }
-      activeInfo[i] = null; 
+
+      activeInfo[i] = null;
       recalculateCollisions();
     }
   }
@@ -403,43 +396,103 @@ function updatePersonModes(people) {
   personModes = updated;
 }
 
-function drawPersonTextureCircles() {
-  for (let p of personModes) {
-    push();
+// =========================
+// PERSON SILHOUETTE TEXTURE
+// 원형 대신 사람 실루엣 모양으로 grass/ocean texture 표시
+// =========================
 
-    drawingContext.save();
-    drawingContext.beginPath();
-    drawingContext.arc(p.x, p.y, PERSON_CIRCLE_RADIUS, 0, TWO_PI);
-    drawingContext.clip();
+function drawPersonTextureSilhouettes() {
+  if (!segmentation || !segmentation.maskImageData) return;
+  if (!personModes || personModes.length === 0) return;
 
-    if (p.mode === "grass") {
-      image(
-        prettyBg,
-        p.x - PERSON_CIRCLE_RADIUS,
-        p.y - PERSON_CIRCLE_RADIUS,
-        PERSON_CIRCLE_RADIUS * 2,
-        PERSON_CIRCLE_RADIUS * 2
-      );
-    } else {
-      image(
-        oceanBg,
-        p.x - PERSON_CIRCLE_RADIUS,
-        p.y - PERSON_CIRCLE_RADIUS,
-        PERSON_CIRCLE_RADIUS * 2,
-        PERSON_CIRCLE_RADIUS * 2
-      );
+  let maskData = segmentation.maskImageData.data;
+
+  let grassMask = createImage(video.width, video.height);
+  let oceanMask = createImage(video.width, video.height);
+
+  grassMask.loadPixels();
+  oceanMask.loadPixels();
+
+  for (let y = 0; y < video.height; y++) {
+    for (let x = 0; x < video.width; x++) {
+      let idx = (y * video.width + x) * 4;
+      let alpha = maskData[idx + 3];
+
+      grassMask.pixels[idx] = 255;
+      grassMask.pixels[idx + 1] = 255;
+      grassMask.pixels[idx + 2] = 255;
+      grassMask.pixels[idx + 3] = 0;
+
+      oceanMask.pixels[idx] = 255;
+      oceanMask.pixels[idx + 1] = 255;
+      oceanMask.pixels[idx + 2] = 255;
+      oceanMask.pixels[idx + 3] = 0;
+
+      if (alpha > 50) {
+        let canvasX = map(x, 0, video.width, width, 0);
+        let canvasY = map(y, 0, video.height, 0, height);
+
+        let closest = getClosestPersonMode(canvasX, canvasY);
+
+        if (closest) {
+          if (closest.mode === "grass") {
+            grassMask.pixels[idx + 3] = alpha;
+          } else {
+            oceanMask.pixels[idx + 3] = alpha;
+          }
+        }
+      }
     }
-
-    drawingContext.restore();
-
-    //stroke(255, 160);
-    //strokeWeight(4);
-    noStroke();
-    noFill();
-    ellipse(p.x, p.y, PERSON_CIRCLE_RADIUS * 2, PERSON_CIRCLE_RADIUS * 2);
-
-    pop();
   }
+
+  grassMask.updatePixels();
+  oceanMask.updatePixels();
+
+  let grassTexture = createImage(width, height);
+  grassTexture.copy(prettyBg, 0, 0, prettyBg.width, prettyBg.height, 0, 0, width, height);
+
+  let oceanTexture = createImage(width, height);
+  oceanTexture.copy(oceanBg, 0, 0, oceanBg.width, oceanBg.height, 0, 0, width, height);
+
+  let bigGrassMask = createGraphics(width, height);
+  bigGrassMask.push();
+  bigGrassMask.translate(width, 0);
+  bigGrassMask.scale(-1, 1);
+  bigGrassMask.image(grassMask, 0, 0, width, height);
+  bigGrassMask.pop();
+
+  let bigOceanMask = createGraphics(width, height);
+  bigOceanMask.push();
+  bigOceanMask.translate(width, 0);
+  bigOceanMask.scale(-1, 1);
+  bigOceanMask.image(oceanMask, 0, 0, width, height);
+  bigOceanMask.pop();
+
+  let grassCutout = grassTexture.get();
+  grassCutout.mask(bigGrassMask.get());
+
+  let oceanCutout = oceanTexture.get();
+  oceanCutout.mask(bigOceanMask.get());
+
+  image(grassCutout, 0, 0);
+  image(oceanCutout, 0, 0);
+}
+
+function getClosestPersonMode(x, y) {
+  if (!personModes || personModes.length === 0) return null;
+
+  let closest = null;
+  let minD = Infinity;
+
+  for (let p of personModes) {
+    let d = dist(x, y, p.x, p.y);
+    if (d < minD) {
+      minD = d;
+      closest = p;
+    }
+  }
+
+  return closest;
 }
 
 function drawDigitalSkeletonsSimple() {
@@ -512,9 +565,11 @@ function getKeypointByName(keypoints, name) {
 
 function isValidKeypoint(kp) {
   if (!kp) return false;
+
   let score = 1;
   if (kp.score !== undefined) score = kp.score;
   if (kp.confidence !== undefined) score = kp.confidence;
+
   return score > 0.2;
 }
 
@@ -554,6 +609,7 @@ function getClosestEligiblePerson(s, peopleWithModes) {
     if (p.mode !== wantedMode) continue;
 
     let d = dist(s.x + GHOST_SIZE / 2, s.y + GHOST_SIZE / 2, p.x, p.y);
+
     if (d < minD) {
       minD = d;
       closest = p;
@@ -563,126 +619,41 @@ function getClosestEligiblePerson(s, peopleWithModes) {
   return closest;
 }
 
-// Helper function to keep our count honest
 function recalculateCollisions() {
   let count = 0;
+
   for (let slot of activeInfo) {
     if (slot !== null) count++;
   }
+
   peopleCollided = count;
 }
 
-function drawBubble() {
-  // Now we loop through the two slots in the array
-  for (let info of activeInfo) {
-    // Skip the slot if it's empty (null)
-    if (!info) continue;
-
-    let t = millis() - info.start;
-    let i = floor(t / SENTENCE_DURATION);
-    
-    // Safety check for the sentence index
-    i = constrain(i, 0, info.sentences.length - 1);
-
-    let textStr = info.sentences[i];
-
-    push();
-    textSize(36);
-    textAlign(CENTER, CENTER);
-    textLeading(46);
-
-    let lines = makeForcedTwoLineText(textStr, 420);
-    let line1 = lines[0];
-    let line2 = lines[1];
-
-    let longest = max(textWidth(line1), textWidth(line2));
-    let bubbleW = constrain(longest + 120, 320, 620);
-    let bubbleH = 150;
-
-    // Use the coordinates of the specific animal/person for this slot
-    let bx = constrain(info.x, bubbleW / 2 + 20, width - bubbleW / 2 - 20);
-    let by = max(info.y - 260, bubbleH / 2 + 20);
-
-    // Draw bubble tail
-    fill(info.color[0], info.color[1], info.color[2], 220);
-    noStroke();
-    triangle(
-      bx - 24, by + bubbleH / 2 - 6,
-      bx + 24, by + bubbleH / 2 - 6,
-      bx,      by + bubbleH / 2 + 30
-    );
-
-    // Draw bubble body
-    rectMode(CENTER);
-    rect(bx, by, bubbleW, bubbleH, 24);
-
-    // Draw text
-    fill(255);
-    text(line1, bx, by - 22);
-    text(line2, bx, by + 22);
-    pop();
-  }
-}
-
-function makeForcedTwoLineText(str, maxLineWidth = 420) {
-  textSize(36);
-
-  let words = str.split(" ");
-  if (words.length <= 1) return [str, " "];
-
-  let bestSplit = 1;
-  let bestScore = Infinity;
-
-  for (let i = 1; i < words.length; i++) {
-    let line1 = words.slice(0, i).join(" ");
-    let line2 = words.slice(i).join(" ");
-
-    let w1 = textWidth(line1);
-    let w2 = textWidth(line2);
-
-    let penalty = 0;
-    if (w1 > maxLineWidth) penalty += (w1 - maxLineWidth) * 10;
-    if (w2 > maxLineWidth) penalty += (w2 - maxLineWidth) * 10;
-
-    let balance = abs(w1 - w2);
-    let score = penalty + balance;
-
-    if (score < bestScore) {
-      bestScore = score;
-      bestSplit = i;
-    }
-  }
-
-  let line1 = words.slice(0, bestSplit).join(" ");
-  let line2 = words.slice(bestSplit).join(" ");
-
-  return [line1, line2];
-}
-
 function moveAttached(s) {
-  // 1. Find the person in the current 'personModes' list that is closest to where the spirit is
   let closestP = null;
-  let minDist = 500; // Only look within a reasonable range
+  let minDist = 500;
 
   for (let p of personModes) {
-    let d = dist(s.x + (ANIMAL_BASE_SIZE * s.species.scale)/2, 
-                 s.y + (ANIMAL_BASE_SIZE * s.species.scale)/2, 
-                 p.x, p.y);
+    let d = dist(
+      s.x + (ANIMAL_BASE_SIZE * s.species.scale) / 2,
+      s.y + (ANIMAL_BASE_SIZE * s.species.scale) / 2,
+      p.x,
+      p.y
+    );
+
     if (d < minDist) {
       minDist = d;
       closestP = p;
     }
   }
 
-  // 2. If we found them, update the target and move
   if (closestP) {
-    s.target = closestP; // Keep the reference fresh
-    
+    s.target = closestP;
+
     let scale = s.species.scale || 1.0;
     let w = ANIMAL_BASE_SIZE * scale;
     let h = ANIMAL_BASE_SIZE * scale;
 
-    // Hard-lock the position to the center of the circle
     s.x = closestP.x - w / 2;
     s.y = closestP.y - h / 2;
   }
@@ -746,6 +717,7 @@ function drawCropMarks() {
   push();
   stroke(255, 0, 0);
   strokeWeight(15);
+
   let len = 40;
   let pad = 20;
 
@@ -760,63 +732,67 @@ function drawCropMarks() {
 
   line(width - pad, height - pad, width - pad - len, height - pad);
   line(width - pad, height - pad, width - pad, height - pad - len);
+
   pop();
 }
 
 function showInfoPanel() {
-  // We loop through our 2 slots
   for (let i = 0; i < activeInfo.length; i++) {
     let info = activeInfo[i];
-    
-    // Position logic: Slot 0 (Left), Slot 1 (Right)
-    let x = (i === 0) ? 80 : width - 680; 
+
+    let x = i === 0 ? 80 : width - 680;
     let y = 100;
     let w = 600;
     let h = height - 200;
 
     if (info) {
-      // --- DRAW THE ACTIVE PANEL ---
       let species = info.spirit.species;
-      
+
+      let t = millis() - info.start;
+      let sentenceIndex = floor(t / SENTENCE_DURATION);
+      sentenceIndex = constrain(sentenceIndex, 0, species.info.length - 1);
+
+      let currentSentence = species.info[sentenceIndex];
+
       push();
-      // Background Box
+
       fill(0, 180);
       stroke(info.color);
       strokeWeight(4);
       rect(x, y, w, h, 20);
-      
-      // Species Name
+
       noStroke();
       fill(info.color);
-      textSize(50);
+      textAlign(LEFT, TOP);
+      textSize(44);
       textStyle(BOLD);
-      text(species.name, x + 30, y + 50, 400);
-      
-      // Habitat Info
-      fill(255);
-      textSize(30);
-      textStyle(NORMAL);
-      text("REGION: Georgia, USA", x + 30, y + 300);
-      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 350);
+      text(species.name, x + 30, y + 40, w - 60);
 
-      // description
       fill(255);
       textSize(28);
       textStyle(NORMAL);
-      text(species.info, x + 30, y + 400, 550);
-      
-      // Big Animal Image
-      // imageMode(CENTER);
-      // image(species.img, x + w/2, y + 400, 200, 200);
-      // pop();
+      text("REGION: Georgia, USA", x + 30, y + 210);
+      text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 250);
 
+      fill(255);
+      textSize(32);
+      textStyle(BOLD);
+      text("ANIMAL MESSAGE", x + 30, y + 330);
+
+      fill(255);
+      textSize(30);
+      textStyle(NORMAL);
+      textLeading(42);
+      text(currentSentence, x + 30, y + 390, w - 60, 260);
+
+      pop();
     }
   }
 }
 
 function resetAll() {
   startTime = millis();
-  activeInfo = [null,null];
+  activeInfo = [null, null];
   personModes = [];
 
   for (let s of spirits) {
@@ -868,7 +844,7 @@ class Spirit {
 
     if (this.state === "ghost") {
       push();
-      tint(255,150);
+      tint(255, 150);
       image(this.img, this.x, this.y, GHOST_SIZE, GHOST_SIZE);
       pop();
     } else {
