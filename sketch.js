@@ -827,7 +827,7 @@ function drawInstructions() {
   fill(255);
   textStyle(BOLD);
   textSize(38);
-  text("Touch a ghost to bring an endangered species back to life!", x, y);
+  text("Catch a ghost to bring an endangered species back to life!", x, y);
 
   // textStyle(NORMAL);
   // textSize(32);
