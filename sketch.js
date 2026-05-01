@@ -16,6 +16,8 @@ let maskBuf, tempG, bigGrassMask, bigOceanMask;
 
 let silhouetteTrailBuffer;
 
+let globalHabitatMode = "grass";
+
 let bodyPose;
 let poses = [];
 
@@ -30,7 +32,7 @@ let spirits = [];
 const GHOST_COUNT = 30;
 
 let speciesData = [];
-let activeInfo = [null, null];
+let activeInfo;
 
 let startTime;
 
@@ -170,6 +172,7 @@ function setup() {
   pixelDensity(1);
 
   peopleCollided = 0;
+  activeInfo = null;
 
   video = createCapture(VIDEO);
   video.size(640, 480);
@@ -230,42 +233,15 @@ function draw() {
 
   drawDigitalSkeletonsSimple();
 
-  let personClaimedThisFrame = [];
-
   for (let s of spirits) {
     s.update();
 
     if (s.state === "ghost") {
-      let emptySlotIndex = activeInfo.indexOf(null);
-
-      if (emptySlotIndex !== -1 && checkCollisionWithPeopleCircles(s, personModes)) {
+      // Only check collision if NO ONE is currently interacting
+      if (activeInfo === null && checkCollisionWithPeopleCircles(s, personModes)) {
         let p = getClosestEligiblePerson(s, personModes);
-
         if (p) {
-          let personIsBusy = false;
-
-          for (let info of activeInfo) {
-            if (info && info.spirit && info.spirit.target) {
-              // maybe change to 600 on bridge if ppl are getting multiple animals
-              if (dist(p.x, p.y, info.spirit.target.x, info.spirit.target.y) < 400) {
-                personIsBusy = true;
-                break;
-              }
-            }
-          }
-
-          for (let claimedP of personClaimedThisFrame) {
-            // maybe change to 600 on bridge if ppl are getting multiple animals
-            if (dist(p.x, p.y, claimedP.x, claimedP.y) < 200) {
-              personIsBusy = true;
-              break;
-            }
-          }
-
-          if (!personIsBusy) {
-            personClaimedThisFrame.push(p);
-            startInteraction(s, p);
-          }
+          startInteraction(s, p);
         }
       }
     }
@@ -282,49 +258,49 @@ function draw() {
   drawPeopleCounter(people.length);
   drawCountdownTimer();
   drawCropMarks();
+  drawInstructions();
 }
 
 function startInteraction(s, p) {
-  let slotIndex = activeInfo.indexOf(null);
+  // Directly assign the spirit to the variable
+  s.state = "attached";
+  s.target = p;
+  s.img = s.species.img;
 
-  if (slotIndex !== -1) {
-    s.state = "attached";
-    s.target = p;
-    s.img = s.species.img;
-
-    activeInfo[slotIndex] = {
-      spirit: s,
-      start: millis(),
-      sentences: s.species.info,
-      color: s.species.bubbleColor,
-      x: p.x,
-      y: p.y
-    };
-
-    recalculateCollisions();
-  }
+  activeInfo = {
+    spirit: s,
+    start: millis(),
+    sentences: s.species.info,
+    color: s.species.bubbleColor,
+    x: p.x,
+    y: p.y
+  };
+  
+  // peopleCollided is now just 0 or 1
+  peopleCollided = 1;
 }
 
 function updateInfo() {
-  for (let i = 0; i < activeInfo.length; i++) {
-    let info = activeInfo[i];
-    if (!info) continue;
+  if (!activeInfo) return;
 
-    if (info.spirit && info.spirit.target) {
-      info.x = info.spirit.target.x;
-      info.y = info.spirit.target.y;
+  if (activeInfo.spirit && activeInfo.spirit.target) {
+    activeInfo.x = activeInfo.spirit.target.x;
+    activeInfo.y = activeInfo.spirit.target.y;
+  }
+
+  if (millis() - activeInfo.start > INFO_TOTAL_DURATION) {
+    if (activeInfo.spirit) {
+      activeInfo.spirit.state = "released";
+      activeInfo.spirit.releaseStartTime = millis();
+      activeInfo.spirit.target = null;
+      
+      // --- SWITCH HABITAT HERE ---
+      // When the animal leaves, the environment "refreshes"
+      globalHabitatMode = (random() < 0.5) ? "grass" : "ocean";
     }
 
-    if (millis() - info.start > INFO_TOTAL_DURATION) {
-      if (info.spirit) {
-        info.spirit.state = "released";
-        info.spirit.releaseStartTime = millis();
-        info.spirit.target = null;
-      }
-
-      activeInfo[i] = null;
-      recalculateCollisions();
-    }
+    activeInfo = null;
+    peopleCollided = 0;
   }
 }
 
@@ -441,7 +417,7 @@ function updatePersonModes(people) {
 function drawPersonTextureSilhouettes() {
   if (!segmentation || !segmentation.maskImageData) return;
 
-  // 1. Update the mask
+  // 1. Prepare the mask
   maskBuf.clear();
   let maskData = segmentation.maskImageData.data;
   maskBuf.loadPixels();
@@ -453,34 +429,29 @@ function drawPersonTextureSilhouettes() {
   }
   maskBuf.updatePixels();
 
-  // 2. Prepare tempG (The Cookie Cutter)
+  // 2. Draw the shared texture
   tempG.clear();
+  let tex = (globalHabitatMode === "ocean") ? oceanBg : prettyBg;
+  
   tempG.push();
+  tempG.image(tex, 0, 0, width, height);
+  
+  // Apply the mask to everyone at once
+  tempG.drawingContext.globalCompositeOperation = 'destination-in';
   tempG.translate(width, 0);
   tempG.scale(-1, 1);
-  tempG.image(maskBuf, 0, 0, width, height); 
-  
-  // Use 'source-in' to make sure the grass only appears in the white mask
-  tempG.drawingContext.globalCompositeOperation = 'source-in';
-  
-  let currentMode = (personModes.length > 0) ? personModes[0].mode : "grass";
-  let tex = (currentMode === "ocean") ? oceanBg : prettyBg;
-  tempG.image(tex, 0, 0, width, height);
+  tempG.image(maskBuf, 0, 0, width, height);
   tempG.pop();
 
-  // 3. The Trail Fix (No more fading to black!)
+  // 3. Trail effect
   silhouetteTrailBuffer.push();
-  // This "eats" the old trail pixels slowly without adding black color
   silhouetteTrailBuffer.drawingContext.globalCompositeOperation = 'destination-out';
-  silhouetteTrailBuffer.fill(255, 60); // 60 is the trail length. Higher = shorter trail.
+  silhouetteTrailBuffer.fill(255, 40); 
   silhouetteTrailBuffer.rect(0, 0, width, height);
-  
-  // Switch back to normal to draw the new silhouette
   silhouetteTrailBuffer.drawingContext.globalCompositeOperation = 'source-over';
   silhouetteTrailBuffer.image(tempG, 0, 0);
   silhouetteTrailBuffer.pop();
 
-  // 4. Draw to main screen
   image(silhouetteTrailBuffer, 0, 0);
 }
 
@@ -622,33 +593,23 @@ function checkCollisionWithPeopleCircles(s, peopleWithModes) {
 function getClosestEligiblePerson(s, peopleWithModes) {
   if (!peopleWithModes.length) return null;
 
-  let wantedMode = s.species.habitat === "marine" ? "ocean" : "grass";
+  // Does this ghost match the current world habitat?
+  let animalHabitat = s.species.habitat; // "marine" or "land"
+  
+  if (animalHabitat === "marine" && globalHabitatMode !== "ocean") return null;
+  if (animalHabitat === "land" && globalHabitatMode !== "grass") return null;
 
+  // If it matches, pick the closest person
   let closest = null;
   let minD = Infinity;
-
   for (let p of peopleWithModes) {
-    if (p.mode !== wantedMode) continue;
-
     let d = dist(s.x + GHOST_SIZE / 2, s.y + GHOST_SIZE / 2, p.x, p.y);
-
     if (d < minD) {
       minD = d;
       closest = p;
     }
   }
-
   return closest;
-}
-
-function recalculateCollisions() {
-  let count = 0;
-
-  for (let slot of activeInfo) {
-    if (slot !== null) count++;
-  }
-
-  peopleCollided = count;
 }
 
 function moveAttached(s) {
@@ -812,63 +773,72 @@ function drawCropMarks() {
 }
 
 function showInfoPanel() {
-  for (let i = 0; i < activeInfo.length; i++) {
-    let info = activeInfo[i];
+  if (!activeInfo) return; // Only draw if there's an animal
 
-    let x = i === 0 ? 80 : width - 680;
-    let y = 100;
-    let w = 600;
-    let h = 600;
+  // Position it somewhere central or specific (since there's only one)
+  let x = 80; 
+  let y = 100;
+  let w = 600;
+  let h = 600;
 
-    if (info) {
-      let species = info.spirit.species;
+  let species = activeInfo.spirit.species;
+  let t = millis() - activeInfo.start;
+  let sentenceIndex = floor(t / SENTENCE_DURATION);
+  sentenceIndex = constrain(sentenceIndex, 0, species.info.length - 1);
 
-      let t = millis() - info.start;
-      let sentenceIndex = floor(t / SENTENCE_DURATION);
-      sentenceIndex = constrain(sentenceIndex, 0, species.info.length - 1);
+  let currentSentence = species.info[sentenceIndex];
 
-      let currentSentence = species.info[sentenceIndex];
+  push();
+  fill(0, 180);
+  stroke(activeInfo.color);
+  strokeWeight(4);
+  rect(x, y, w, h, 20);
 
-      push();
+  noStroke();
+  fill(activeInfo.color);
+  textAlign(CENTER, TOP);
+  textSize(50);
+  textStyle(BOLD);
+  text(species.name, x + 30, y + 40, w - 50);
 
-      fill(0, 180);
-      stroke(info.color);
-      strokeWeight(4);
-      rect(x, y, w, h, 20);
+  fill(255);
+  textSize(40);
+  textStyle(NORMAL);
+  textAlign(CENTER);
+  textLeading(42);
+  text(currentSentence, x + 30, y + 210, w - 50, 260);
+  pop();
+}
 
-      noStroke();
-      fill(info.color);
-      textAlign(CENTER, TOP);
-      textSize(50);
-      textStyle(BOLD);
-      text(species.name, x + 30, y + 40, w - 50);
+function drawInstructions() {
+  push();
 
-      // fill(255);
-      // textSize(30);
-      // textStyle(NORMAL);
-      // text("REGION: Georgia, USA", x + 30, y + 210);
-      // text("HABITAT: " + species.habitat.toUpperCase(), x + 30, y + 250);
+  let boxW = 1400;
+  let boxH = 120;
+  let x = width / 2;
+  let y = 90;
 
-      // fill(255);
-      // textSize(32);
-      // textStyle(BOLD);
-      // text("ANIMAL MESSAGE", x + 30, y + 330);
+  rectMode(CENTER);
+  noStroke();
+  fill(0, 180);
+  rect(x, y, boxW, boxH, 24);
 
-      fill(255);
-      textSize(40);
-      textStyle(NORMAL);
-      textAlign(CENTER);
-      textLeading(42);
-      text(currentSentence, x + 30, y + 210, w - 50, 260);
+  textAlign(CENTER, CENTER);
+  fill(255);
+  textStyle(BOLD);
+  textSize(38);
+  text("Touch a ghost to bring an endangered species back to life!", x, y);
 
-      pop();
-    }
-  }
+  // textStyle(NORMAL);
+  // textSize(32);
+  // text("Your presence has the power to help save them!", x, y + 28);
+
+  pop();
 }
 
 function resetAll() {
   startTime = millis();
-  activeInfo = [null, null];
+  activeInfo = null;
   personModes = [];
 
   for (let s of spirits) {
