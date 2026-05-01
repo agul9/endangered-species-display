@@ -59,7 +59,7 @@ function preload() {
   let redCockadedWoodpeckerImg = loadImage("assets/animals/woodpecker2.gif");
   let westIndianManateeImg = loadImage("assets/animals/WestIndianManatee.png");
   let loggerHeadSeaTurtleImg = loadImage("assets/animals/sea turtle3.gif");
-  let woodStorkImg = loadImage("assets/animals/WoodStork.png");
+  let woodStorkImg = loadImage("assets/animals/stork.gif");
   let etowahDarterImg = loadImage("assets/animals/fish.gif");
 
   speciesData = [
