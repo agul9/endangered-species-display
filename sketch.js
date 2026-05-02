@@ -56,7 +56,7 @@ function preload() {
   oceanBg = loadImage("assets/animals/ocean.jpg");
   constructionBg = loadImage("assets/construction.png");
 
-  let northAtlanticRightWhaleImg = loadImage("assets/animals/northAtlanticRightWhale.png");
+  let northAtlanticRightWhaleImg = loadImage("assets/animals/whale.gif");
   let gopherTortoiseImg = loadImage("assets/animals/tortoise2.gif");
   let redCockadedWoodpeckerImg = loadImage("assets/animals/woodpecker2.gif");
   let westIndianManateeImg = loadImage("assets/animals/WestIndianManatee.png");
@@ -170,6 +170,9 @@ function preload() {
 function setup() {
   createCanvas(3072, 1280);
   pixelDensity(1);
+
+  randomSeed(millis());
+  globalHabitatMode = (random() < 0.5) ? "grass" : "ocean";
 
   peopleCollided = 0;
   activeInfo = null;
