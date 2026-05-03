@@ -27,6 +27,7 @@ let constructionBg;
 
 let bgBuffer;
 let ghostImg;
+let ghostImg2;
 
 let spirits = [];
 const GHOST_COUNT = 30;
@@ -51,7 +52,8 @@ const GHOST_SIZE = 60;
 const ANIMAL_BASE_SIZE = 220;
 
 function preload() {
-  ghostImg = loadImage("assets/animals/ghost.png");
+  ghostImg = loadImage("assets/animals/ghost.gif");
+  ghostImg2 = loadImage("assets/animals/ghost2.gif");
   prettyBg = loadImage("assets/grass.jpg");
   oceanBg = loadImage("assets/animals/ocean.jpg");
   constructionBg = loadImage("assets/construction.png");
@@ -205,8 +207,14 @@ function setup() {
     poses = res;
   });
 
+  let randomGhost, s;
   for (let i = 0; i < GHOST_COUNT; i++) {
-    let s = new Spirit(ghostImg, random(speciesData));
+    randomGhost = random();
+    if (randomGhost < 0.5) {
+      s = new Spirit(ghostImg, random(speciesData));
+    } else {
+      s = new Spirit(ghostImg2, random(speciesData));
+    }
     s.x = random(width - 100);
     s.y = random(height - 100);
     spirits.push(s);
