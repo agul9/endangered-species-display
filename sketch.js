@@ -854,7 +854,13 @@ function resetAll() {
 
   for (let s of spirits) {
     s.state = "ghost";
-    s.img = ghostImg;
+
+    if (random() < 0.5) {
+      s.img = ghostImg;
+    } else {
+      s.img = ghostImg2;
+    }
+    
     s.species = random(speciesData);
     s.target = null;
     s.releaseStartTime = 0;
